@@ -8,6 +8,8 @@ import {
   CalendarDays,
   BookOpenText,
   GraduationCap,
+  Utensils,
+  ListTodo,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -20,7 +22,9 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { label: "Мониторинг", href: "/", icon: Activity },
+  { label: "Задачи", href: "/tasks", icon: ListTodo },
   { label: "Инциденты", href: "/incidents", icon: AlertTriangle },
+  { label: "Столовая", href: "/canteen", icon: Utensils },
   { label: "Расписание", href: "/schedule", icon: CalendarDays },
   { label: "База знаний", href: "/knowledge", icon: BookOpenText },
 ];

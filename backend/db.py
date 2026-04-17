@@ -126,6 +126,40 @@ async def create_task(
     return await asyncio.to_thread(_run)
 
 
+# ========== attendance_reports ==========
+
+async def create_attendance_report(
+    *,
+    class_name: str | None,
+    present_count: int,
+    absent_count: int,
+    absent_list: list[str],
+    portions: int,
+    raw_text: str,
+    created_by_tg_id: int,
+) -> dict[str, Any]:
+    """Создать структурированный отчёт по посещаемости (для столовой)."""
+    def _run() -> dict[str, Any]:
+        resp = (
+            supabase.table("attendance_reports")
+            .insert(
+                {
+                    "class_name": class_name,
+                    "present_count": present_count,
+                    "absent_count": absent_count,
+                    "absent_list": absent_list,
+                    "portions": portions,
+                    "raw_text": raw_text,
+                    "created_by_tg_id": created_by_tg_id,
+                }
+            )
+            .execute()
+        )
+        return resp.data[0]
+
+    return await asyncio.to_thread(_run)
+
+
 # ========== incidents ==========
 
 async def create_incident(

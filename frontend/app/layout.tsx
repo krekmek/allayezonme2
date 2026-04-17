@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Sidebar } from "@/components/sidebar";
+import { VoiceTaskButton } from "@/components/voice-task-button";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,6 +20,7 @@ export default function RootLayout({
           <Sidebar />
           <main className="flex-1 p-8 overflow-x-hidden">{children}</main>
         </div>
+        <VoiceTaskButton />
       </body>
     </html>
   );

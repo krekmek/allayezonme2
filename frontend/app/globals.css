@@ -81,4 +81,27 @@
   .border-neon {
     border-color: rgba(168, 85, 247, 0.35);
   }
+
+  .shadow-neon {
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
+  }
+
+  .shadow-neon-sm {
+    box-shadow: 0 0 6px rgba(168, 85, 247, 0.3);
+  }
+
+  @keyframes pulse-neon {
+    0%, 100% {
+      box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+      background-color: rgba(168, 85, 247, 0.1);
+    }
+    50% {
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.7);
+      background-color: rgba(168, 85, 247, 0.2);
+    }
+  }
+
+  .animate-pulse-neon {
+    animation: pulse-neon 1.5s ease-in-out;
+  }
 }

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     DEEPSEEK_API_KEY: str = ""
     GROQ_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
     DATABASE_URL: str = ""  # postgres connection string (Supabase → Project Settings → Database)
 
     model_config = SettingsConfigDict(

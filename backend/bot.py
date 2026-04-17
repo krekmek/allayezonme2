@@ -5,7 +5,7 @@ import re
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -19,6 +19,7 @@ from aiogram.types import (
 from audio import transcribe_ogg
 from config import settings
 from db import (
+    create_attendance_report,
     create_incident,
     create_staff,
     create_task,
@@ -263,21 +264,9 @@ async def handle_report_text(message: Message, state: FSMContext) -> None:
         await message.answer("Пустой текст. Попробуйте ещё раз:")
         return
 
-    try:
-        staff = await get_current_staff(message)
-        await create_incident(
-            description=text,
-            created_by_tg_id=current_tg_id_for_record(message, staff),
-            location="столовая",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logging.exception("Failed to create incident")
-        await message.answer(f"Ошибка при сохранении отчёта: {exc}")
-        await state.clear()
-        return
-
     await state.clear()
-    await message.answer("Отчёт принят. Спасибо!")
+    # Прогоняем отчёт через NLP: он сохранит в attendance_reports, если это посещаемость.
+    await _route_classified(message, text, source="report")
 
 
 # ---------------------- NLP-маршрутизация (общая для текста и голоса) ----------------------
@@ -356,14 +345,43 @@ async def _route_classified(message: Message, text: str, *, source: str) -> None
         return
 
     if msg_type == "attendance":
-        class_name = details.get("class_name") or "не указан"
+        class_name = details.get("class_name")
         absent = details.get("absent") or []
-        absent_str = ", ".join(absent) if isinstance(absent, list) and absent else "—"
+        if not isinstance(absent, list):
+            absent = []
+        absent = [str(x).strip() for x in absent if str(x).strip()]
+
+        present_count = details.get("present_count")
+        try:
+            present_count = int(present_count) if present_count is not None else 0
+        except (TypeError, ValueError):
+            present_count = 0
+
+        # Число порций = число присутствующих (если указано), иначе считаем по отсутствующим
+        portions = present_count if present_count > 0 else max(0, present_count)
+
+        try:
+            report = await create_attendance_report(
+                class_name=class_name,
+                present_count=present_count,
+                absent_count=len(absent),
+                absent_list=absent,
+                portions=portions,
+                raw_text=text,
+                created_by_tg_id=creator_tg_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.exception("Failed to save attendance report")
+            await message.answer(f"Не удалось сохранить отчёт по посещаемости: {exc}")
+            return
+
+        absent_str = ", ".join(absent) if absent else "—"
         await message.answer(
-            "<b>Отчёт по посещаемости принят</b>\n"
-            f"Класс: <i>{class_name}</i>\n"
-            f"Отсутствуют: {absent_str}\n\n"
-            "<i>(сохранение в БД будет добавлено позже)</i>"
+            "<b>Отчёт по посещаемости сохранён</b>\n"
+            f"Класс: <i>{class_name or 'не указан'}</i>\n"
+            f"Присутствует: <b>{present_count}</b> (порций: {portions})\n"
+            f"Отсутствуют: {absent_str}\n"
+            f"ID: <code>{report.get('id')}</code>"
         )
         return
 
@@ -462,11 +480,8 @@ async def _handle_substitution(message: Message, details: dict) -> None:
 
 # ---------------------- Свободный текст ----------------------
 
-@dp.message(F.text & ~F.text.startswith("/"))
+@dp.message(StateFilter(None), F.text & ~F.text.startswith("/"))
 async def handle_free_text(message: Message, state: FSMContext) -> None:
-    if await state.get_state() is not None:
-        return
-
     staff = await get_current_staff(message)
     if staff is None:
         await message.answer(
