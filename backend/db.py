@@ -32,11 +32,49 @@ async def get_staff_by_tg_id(telegram_id: int) -> dict[str, Any] | None:
     return await asyncio.to_thread(_run)
 
 
+async def get_staff_by_id(staff_id: int) -> dict[str, Any] | None:
+    """Вернуть запись сотрудника по первичному ключу id."""
+    def _run() -> dict[str, Any] | None:
+        resp = (
+            supabase.table("staff")
+            .select("*")
+            .eq("id", staff_id)
+            .limit(1)
+            .execute()
+        )
+        return resp.data[0] if resp.data else None
+
+    return await asyncio.to_thread(_run)
+
+
+async def list_staff() -> list[dict[str, Any]]:
+    """Вернуть всех сотрудников (для выбора в /login_as)."""
+    def _run() -> list[dict[str, Any]]:
+        resp = supabase.table("staff").select("*").order("id").execute()
+        return resp.data or []
+
+    return await asyncio.to_thread(_run)
+
+
+async def find_staff_by_fio(fio_substring: str) -> list[dict[str, Any]]:
+    """Найти сотрудников, у которых ФИО содержит подстроку (регистронезависимо)."""
+    def _run() -> list[dict[str, Any]]:
+        resp = (
+            supabase.table("staff")
+            .select("*")
+            .ilike("fio", f"%{fio_substring}%")
+            .execute()
+        )
+        return resp.data or []
+
+    return await asyncio.to_thread(_run)
+
+
 async def create_staff(
     *,
     fio: str,
     role: str,
-    telegram_id: int,
+    telegram_id: int | None = None,
     specialization: str | None = None,
 ) -> dict[str, Any]:
     """Создать сотрудника и вернуть вставленную запись."""
