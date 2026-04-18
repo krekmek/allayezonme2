@@ -175,7 +175,7 @@ export function VoiceTaskButton() {
     setStatus({ kind: "processing", transcript });
 
     try {
-      const resp = await fetch("http://localhost:8001/api/process-text", {
+      const resp = await fetch("/api/voice/task", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: transcript }),

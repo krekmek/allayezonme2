@@ -11,26 +11,150 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const WHISPER_MODEL = "whisper-large-v3";
 const LLM_MODEL = "llama-3.3-70b-versatile";
 
-const TASK_EXTRACT_PROMPT = `Ты — ассистент директора школы. На вход получаешь транскрипт голосового поручения.
-Извлеки из него задачу в строгом JSON:
+// Ключевые глаголы действия для Intent Guard
+const ACTION_VERBS = [
+  "напиши", "напишите", "подготовь", "подготовьте", "проверь", "проверьте",
+  "собери", "соберите", "организуй", "организуйте", "отправь", "отправьте",
+  "составь", "составьте", "сделай", "сделайте", "купи", "купите",
+  "позвони", "позвоните", "назначь", "назначьте", "передай", "передайте",
+  "закажи", "закажите", "принеси", "принесите", "создай", "создайте",
+  "обнови", "обновите", "исправь", "исправьте", "разработай", "разработайте",
+  "представь", "представьте", "распечатай", "распечатайте", "напомни", "напомните",
+  "убери", "уберите", "почини", "почините", "проведи", "проведите",
+  "разошли", "разошлите", "оформи", "оформите", "внеси", "внесите",
+  "найди", "найдите", "замени", "замените", "установи", "установите",
+  "запиши", "запишите", "посчитай", "посчитайте", "скажи", "скажите",
+  "запусти", "запустите", "удали", "удалите", "добавь", "добавьте",
+  "проконтролируй", "сообщи", "сообщите", "уведоми", "уведомите",
+  "договорись", "договоритесь", "поручи", "поручите", "нужно", "надо",
+  "следует", "должен", "должна", "должны",
+];
 
-{
-  "title": "краткая формулировка поручения (до 120 символов, с большой буквы, без точки в конце)",
-  "assignee": "кому поручено (ФИО, имя или роль, если есть; иначе null)",
-  "due_date": "срок в формате YYYY-MM-DD (если вычисляется из относительных выражений) или null",
-  "description": "полный текст поручения, приведённый к литературному виду"
+// Стоп-фразы
+const STOP_PHRASES = [
+  "добрый день", "добрый вечер", "доброе утро", "здравствуй", "здравствуйте",
+  "привет", "приветствую", "как дела", "как ты", "как вы", "спасибо",
+  "пожалуйста", "окей", "ок", "да", "нет", "ага", "угу", "хорошо",
+  "понял", "поняла", "поняли", "что делать", "что думаешь", "как тебе",
+];
+
+function heuristicIsValid(text: string): boolean | null {
+  const clean = text.toLowerCase().trim();
+  
+  if (clean.length < 5) return false;
+  if (STOP_PHRASES.includes(clean)) return false;
+  
+  const words = clean.split(/\s+/);
+  for (const word of words) {
+    const wordClean = word.replace(/[.,!?;:]+$/, "");
+    if (ACTION_VERBS.includes(wordClean)) return true;
+  }
+  
+  return null;
 }
 
-Важно:
-- Отвечай ТОЛЬКО JSON, без пояснений и без markdown-обёрток.
-- Если исходник не похож на поручение — всё равно заполни title и description, assignee/due_date поставь null.`;
+async function parseTasksFromText(text: string, staffList: any[]): Promise<{ valid: boolean; tasks?: any[]; reason?: string; message?: string }> {
+  const heuristic = heuristicIsValid(text);
+  if (heuristic === false) {
+    return {
+      valid: false,
+      reason: "not_a_task",
+      message: "Фраза не содержит поручения",
+    };
+  }
+  
+  const staffNames = staffList.map((s: any) => s.fio).join(", ");
+  const today = new Date().toISOString().slice(0, 10);
+  
+  const systemPrompt = `Ты — СТРОГИЙ Intent Guard для системы управления школой. Твоя задача — фильтровать голосовые команды директора.
 
-type ExtractedTask = {
-  title: string;
-  assignee: string | null;
-  due_date: string | null;
-  description: string;
-};
+ДОМЕН: только школьное управление — замены, столовая, хоз. поручения, приказы, отчёты, родительские собрания, проверки, организация мероприятий.
+
+Список сотрудников: ${staffNames}
+Сегодня: ${today}
+
+АЛГОРИТМ:
+1. Если фраза — случайный разговор, шум, приветствие, междометие или бессмыслица → valid=false, reason="not_a_task"
+2. Если фраза похожа на поручение, но БЕЗ конкретики (нет что делать или с чем) → valid=false, reason="missing_details"
+3. Только если фраза — ЯВНОЕ школьное поручение с конкретикой → valid=true + список задач
+
+ПРИМЕРЫ ОТКАЗОВ:
+Вход: "Привет, как дела"
+Выход: {"valid": false, "reason": "not_a_task", "message": "Это приветствие, не поручение"}
+
+Вход: "Эй, сделай там что-нибудь"
+Выход: {"valid": false, "reason": "missing_details", "message": "Неясно что именно нужно сделать"}
+
+Вход: "спасибо, окей, понял"
+Выход: {"valid": false, "reason": "not_a_task", "message": "Подтверждения не являются задачами"}
+
+ПРИМЕРЫ ВАЛИДНЫХ ЗАДАЧ:
+Вход: "Напишите отчёт по 5А классу к пятнице"
+Выход: {"valid": true, "tasks": [{"description": "Написать отчёт по 5А классу", "assignee": null, "due_date": "YYYY-MM-DD (пятница)"}]}
+
+Вход: "Иван Петрович подготовьте замену на завтра для Сидоровой"
+Выход: {"valid": true, "tasks": [{"description": "Подготовить замену для Сидоровой", "assignee": "Иван Петрович...", "due_date": "завтрашняя дата"}]}
+
+Формат ответа — строго JSON:
+Для валидных: {"valid": true, "tasks": [{"description": "...", "assignee": "ФИО или null", "due_date": "YYYY-MM-DD или null"}]}
+Для невалидных: {"valid": false, "reason": "not_a_task" | "missing_details", "message": "короткое объяснение на русском"}`;
+
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: LLM_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: text },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.0,
+      }),
+    });
+    
+    if (!response.ok) {
+      const t = await response.text();
+      throw new Error(`LLM ${response.status}: ${t}`);
+    }
+    
+    const data = await response.json();
+    const raw = data.choices?.[0]?.message?.content || "{}";
+    const parsed = JSON.parse(raw);
+    
+    if (parsed.valid === false) {
+      return {
+        valid: false,
+        reason: parsed.reason || "not_a_task",
+        message: parsed.message || "ИИ не распознал задачу",
+      };
+    }
+    
+    const tasks = parsed.tasks || [];
+    const validTasks = tasks.filter((t: any) => t.description && t.description.length >= 3);
+    
+    if (validTasks.length === 0) {
+      return {
+        valid: false,
+        reason: "not_a_task",
+        message: "ИИ не нашёл конкретных поручений в фразе",
+      };
+    }
+    
+    return { valid: true, tasks: validTasks };
+  } catch (error: any) {
+    console.error("Intent Guard error:", error);
+    return {
+      valid: false,
+      reason: "llm_error",
+      message: `Ошибка AI: ${error.message}`,
+    };
+  }
+}
 
 async function transcribeAudio(blob: Blob, filename: string): Promise<string> {
   const form = new FormData();
@@ -51,52 +175,7 @@ async function transcribeAudio(blob: Blob, filename: string): Promise<string> {
     const t = await resp.text();
     throw new Error(`Whisper ${resp.status}: ${t}`);
   }
-  // При response_format=text возвращается plain-text
   return (await resp.text()).trim();
-}
-
-async function extractTask(transcript: string): Promise<ExtractedTask> {
-  const today = new Date().toISOString().slice(0, 10);
-  const resp = await fetch(
-    "https://api.groq.com/openai/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        messages: [
-          {
-            role: "system",
-            content:
-              TASK_EXTRACT_PROMPT +
-              `\n\nСегодня: ${today}. Используй эту дату для вычисления due_date из слов «завтра», «в пятницу», «через неделю» и т.п.`,
-          },
-          { role: "user", content: transcript },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.2,
-      }),
-    }
-  );
-  if (!resp.ok) {
-    const t = await resp.text();
-    throw new Error(`LLM ${resp.status}: ${t}`);
-  }
-  const data = await resp.json();
-  const raw = data.choices?.[0]?.message?.content || "{}";
-  const parsed = JSON.parse(raw);
-  return {
-    title: String(parsed.title || "Новая задача").slice(0, 200),
-    assignee: parsed.assignee ? String(parsed.assignee) : null,
-    due_date:
-      parsed.due_date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.due_date)
-        ? parsed.due_date
-        : null,
-    description: String(parsed.description || transcript),
-  };
 }
 
 export async function POST(req: NextRequest) {
@@ -108,18 +187,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const form = await req.formData();
-    const file = form.get("audio") as File | null;
-    if (!file || typeof file === "string") {
-      return NextResponse.json(
-        { error: "Отсутствует поле audio" },
-        { status: 400 }
-      );
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
+    
+    // Получаем список сотрудников для Intent Guard
+    const { data: staffList } = await supabase.from("staff").select("fio");
+    
+    // Проверяем, передан ли текст напрямую (от Web Speech API) или аудио файл
+    const contentType = req.headers.get("content-type") || "";
+    let transcript = "";
+    
+    if (contentType.includes("application/json")) {
+      // Текст от Web Speech API
+      const body = await req.json();
+      transcript = body.text || "";
+    } else {
+      // Аудио файл
+      const form = await req.formData();
+      const file = form.get("audio") as File | null;
+      if (!file || typeof file === "string") {
+        return NextResponse.json(
+          { error: "Отсутствует поле audio" },
+          { status: 400 }
+        );
+      }
+      const filename = file.name && file.name.length > 0 ? file.name : "voice.webm";
+      transcript = await transcribeAudio(file as Blob, filename);
     }
-    const filename = file.name && file.name.length > 0 ? file.name : "voice.webm";
-
-    // 1) Транскрипция
-    const transcript = await transcribeAudio(file as Blob, filename);
+    
     if (!transcript) {
       return NextResponse.json(
         { error: "Не удалось распознать голос — попробуйте ещё раз" },
@@ -127,35 +221,49 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2) Извлекаем задачу
-    const task = await extractTask(transcript);
-
-    // 3) Сохраняем в tasks (status='new' — попадает в колонку «Новое»)
-    // created_by_tg_id обязателен в схеме — используем 0 как маркер "с фронта".
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
-    const insertBody = {
-      description: task.description,
-      assignee: task.assignee,
-      due_date: task.due_date,
-      status: "new",
-      source: "voice",
-      created_by_tg_id: 0,
-    };
-    const { data: inserted, error } = await supabase
-      .from("tasks")
-      .insert(insertBody)
-      .select()
-      .single();
-    if (error) {
+    // Intent Guard
+    const result = await parseTasksFromText(transcript, staffList || []);
+    
+    if (!result.valid) {
       return NextResponse.json(
-        { error: `Supabase: ${error.message}` },
-        { status: 500 }
+        {
+          valid: false,
+          transcript,
+          tasks: [],
+          reason: result.reason,
+          error: result.message,
+        },
+        { status: 400 }
       );
     }
 
+    // Создаём задачи
+    const createdTasks = [];
+    for (const taskData of result.tasks || []) {
+      const insertBody = {
+        description: taskData.description,
+        assignee: taskData.assignee || null,
+        due_date: taskData.due_date || null,
+        status: "new",
+        source: "voice",
+        created_by_tg_id: 0,
+      };
+      const { data: inserted, error } = await supabase
+        .from("tasks")
+        .insert(insertBody)
+        .select()
+        .single();
+      
+      if (!error && inserted) {
+        createdTasks.push(inserted);
+      }
+    }
+
     return NextResponse.json({
+      valid: true,
       transcript,
-      task: { ...inserted, title: task.title },
+      tasks: createdTasks,
+      count: createdTasks.length,
     });
   } catch (e: any) {
     console.error("Voice task error:", e);
