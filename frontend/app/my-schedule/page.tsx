@@ -17,6 +17,7 @@ type Staff = {
   id: number;
   fio: string;
   specialization: string | null;
+  role: string;
 };
 
 const DAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -38,6 +39,12 @@ export default function MySchedulePage() {
         .single();
 
       if (staffData) {
+        // Директоры не имеют личного расписания
+        if (staffData.role === "director") {
+          setLoading(false);
+          return;
+        }
+
         setStaff(staffData);
 
         const { data: lessonsData } = await supabase
@@ -55,6 +62,23 @@ export default function MySchedulePage() {
   }, [selectedDay]);
 
   const filteredLessons = lessons.filter(l => l.day_of_week === selectedDay);
+
+  // Директоры не имеют личного расписания
+  if (staff && staff.role === "director") {
+    return (
+      <div className="min-h-screen bg-background p-4 pb-20">
+        <header className="mb-6">
+          <h1 className="text-2xl font-bold text-foreground">Моё расписание</h1>
+          {staff && (
+            <p className="text-muted-foreground">{staff.fio}</p>
+          )}
+        </header>
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <p>Директоры не имеют личного расписания уроков</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-4 pb-20">

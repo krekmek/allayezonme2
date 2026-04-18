@@ -50,7 +50,7 @@ export function Sidebar() {
         </div>
         <div>
           <div className="text-sm uppercase tracking-widest text-muted-foreground">
-            School AI
+            Aqbobek Artificial Assistant
           </div>
           <div className="font-semibold text-foreground">Панель управления</div>
         </div>

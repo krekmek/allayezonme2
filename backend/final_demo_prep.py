@@ -31,7 +31,7 @@ TEACHERS = [
     {"fio": "Орынбасар Смаилов", "specialization": "Физкультура", "telegram_id": 1013, "role": "teacher"},
     {"fio": "Раушан Мусина", "specialization": "Музыка", "telegram_id": 1014, "role": "teacher"},
     {"fio": "Сания Есенова", "specialization": "Изобразительное искусство", "telegram_id": 1015, "role": "teacher"},
-    {"fio": "Тлектес Акимов", "specialization": "Директор", "telegram_id": 2000, "role": "director"},
+    {"fio": "Бекзат Сапаргалиевна", "specialization": "Директор", "telegram_id": 2000, "role": "director"},
     {"fio": "Арман Косанов", "specialization": "Математика", "telegram_id": 1016, "role": "teacher"},
     {"fio": "Батыр Тургумбаев", "specialization": "Математика", "telegram_id": 1017, "role": "teacher"},
     {"fio": "Дина Смаилова", "specialization": "Русский язык", "telegram_id": 1018, "role": "teacher"},

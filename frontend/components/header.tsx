@@ -8,7 +8,6 @@ import { ModeToggle } from "./mode-toggle";
 const navItems = [
   { href: "/", label: "Дашборд" },
   { href: "/schedule", label: "Расписание" },
-  { href: "/my-schedule", label: "Моё расписание" },
   { href: "/classes", label: "Классы" },
   { href: "/settings", label: "Настройки" },
 ];
