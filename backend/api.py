@@ -409,6 +409,219 @@ async def get_telegram_messages() -> list[dict[str, Any]]:
     return await asyncio.to_thread(_run)
 
 
+# ==================== School Settings API ====================
+
+class CurriculumItem(BaseModel):
+    id: int | None = None
+    class_name: str
+    subject: str
+    hours_per_week: int
+
+
+@app.get("/api/curriculum")
+async def get_curriculum() -> list[dict[str, Any]]:
+    """Получить учебный план."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("curriculum").select("*").execute()
+        return resp.data or []
+
+    return await asyncio.to_thread(_run)
+
+
+@app.post("/api/curriculum")
+async def create_curriculum(item: CurriculumItem) -> dict[str, Any]:
+    """Создать запись учебного плана."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("curriculum").insert({
+            "class_name": item.class_name,
+            "subject": item.subject,
+            "hours_per_week": item.hours_per_week,
+        }).execute()
+        return (resp.data or [{}])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+@app.put("/api/curriculum/{item_id}")
+async def update_curriculum(item_id: int, item: CurriculumItem) -> dict[str, Any]:
+    """Обновить запись учебного плана."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("curriculum").update({
+            "class_name": item.class_name,
+            "subject": item.subject,
+            "hours_per_week": item.hours_per_week,
+            "updated_at": "NOW()",
+        }).eq("id", item_id).execute()
+        return (resp.data or [{}])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+@app.delete("/api/curriculum/{item_id}")
+async def delete_curriculum(item_id: int) -> dict[str, Any]:
+    """Удалить запись учебного плана."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("curriculum").delete().eq("id", item_id).execute()
+        return {"ok": len(resp.data or []) > 0}
+
+    return await asyncio.to_thread(_run)
+
+
+class RoomType(BaseModel):
+    id: int | None = None
+    type_code: str
+    name: str
+    capacity: int
+
+
+@app.get("/api/room-types")
+async def get_room_types() -> list[dict[str, Any]]:
+    """Получить типы кабинетов."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("room_types").select("*").execute()
+        return resp.data or []
+
+    return await asyncio.to_thread(_run)
+
+
+@app.post("/api/room-types")
+async def create_room_type(item: RoomType) -> dict[str, Any]:
+    """Создать тип кабинета."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("room_types").insert({
+            "type_code": item.type_code,
+            "name": item.name,
+            "capacity": item.capacity,
+        }).execute()
+        return (resp.data or [{}])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+@app.put("/api/room-types/{item_id}")
+async def update_room_type(item_id: int, item: RoomType) -> dict[str, Any]:
+    """Обновить тип кабинета."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("room_types").update({
+            "type_code": item.type_code,
+            "name": item.name,
+            "capacity": item.capacity,
+            "updated_at": "NOW()",
+        }).eq("id", item_id).execute()
+        return (resp.data or [{}])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+@app.delete("/api/room-types/{item_id}")
+async def delete_room_type(item_id: int) -> dict[str, Any]:
+    """Удалить тип кабинета."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("room_types").delete().eq("id", item_id).execute()
+        return {"ok": len(resp.data or []) > 0}
+
+    return await asyncio.to_thread(_run)
+
+
+class SchoolSetting(BaseModel):
+    key: str
+    value: str
+    description: str | None = None
+
+
+@app.get("/api/school-settings")
+async def get_school_settings() -> list[dict[str, Any]]:
+    """Получить настройки школы."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("school_settings").select("*").execute()
+        return resp.data or []
+
+    return await asyncio.to_thread(_run)
+
+
+@app.put("/api/school-settings/{setting_key}")
+async def update_school_setting(setting_key: str, item: SchoolSetting) -> dict[str, Any]:
+    """Обновить настройку школы."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("school_settings").upsert({
+            "key": setting_key,
+            "value": item.value,
+            "description": item.description,
+            "updated_at": "NOW()",
+        }).execute()
+        return (resp.data or [{}])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+# ==================== RAG Simplify API ====================
+
+class SimplifyRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/rag/simplify")
+async def simplify_text(req: SimplifyRequest) -> dict[str, Any]:
+    """Упростить текст для учителей с помощью Groq LLM."""
+    from openai import AsyncOpenAI
+    from config import settings
+    import re
+
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY не задан")
+
+    SYSTEM_PROMPT = """Ты — помощник директора школы. Твоя задача — упростить сложный пункт приказа так, чтобы он был понятен каждому учителю.
+
+Требования к ответу:
+- РОВНО 3 буллит-поинта, каждый на новой строке
+- Каждый пункт начинается с "• " (bullet + пробел)
+- Каждый пункт — одно короткое предложение (максимум 15 слов)
+- Простой разговорный русский, без канцеляризмов и юридических оборотов
+- Конкретные действия, сроки и кому что делать
+- БЕЗ вступлений, БЕЗ заключений, БЕЗ markdown — только три строки с буллитами"""
+
+    client = AsyncOpenAI(
+        api_key=settings.GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
+
+    response = await client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": req.text},
+        ],
+        temperature=0.3,
+    )
+    raw = response.choices[0].message.content or ""
+    bullets = [
+        re.sub(r"^[•\-\*·]\s*", "", l).strip()
+        for l in raw.split("\n")
+        if l.strip()
+    ][:3]
+    return {"bullets": bullets, "raw": raw}
+
+
 class CreateAbsenceRequest(BaseModel):
     teacher_id: int
     reason_text: str | None = None
@@ -517,6 +730,19 @@ async def request_substitution(request: RequestSubstitutionRequest) -> dict[str,
             else "Замена создана, но уведомление не отправлено"
         ),
     }
+
+
+@app.delete("/api/substitutions/{substitution_id}")
+async def delete_substitution(substitution_id: int) -> dict[str, Any]:
+    """Удалить заявку на замену."""
+    from db import supabase
+
+    def _run():
+        resp = supabase.table("substitutions").delete().eq("id", substitution_id).execute()
+        return resp.data
+
+    await asyncio.to_thread(_run)
+    return {"ok": True}
 
 
 @app.get("/api/substitution/{teacher_id}")

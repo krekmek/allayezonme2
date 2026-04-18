@@ -34,21 +34,21 @@ export async function generateCanteenReport(
 
   container.innerHTML = `
     <div style="text-align: center; margin-bottom: 20px;">
-      <h1 style="color: #805ad5; font-size: 24px; margin: 0;">Школа Aqbobek</h1>
+      <h1 style="color: #000000; font-size: 24px; margin: 0;">Школа Aqbobek</h1>
       <p style="font-size: 12px; margin: 5px 0; color: #666;">Отчет по столовой</p>
       <p style="font-size: 10px; margin: 5px 0; color: #888;">Дата: ${dateStr}</p>
-      <hr style="border: none; border-top: 1px solid #805ad5; margin: 15px 0;">
+      <hr style="border: none; border-top: 1px solid #000000; margin: 15px 0;">
     </div>
 
     <div style="margin-bottom: 20px;">
-      <h2 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">Сводка</h2>
+      <h2 style="font-size: 14px; margin: 0 0 10px 0; color: #000000;">Сводка</h2>
       <p style="font-size: 11px; margin: 5px 0; color: #666;">Всего отчётов: ${rows.length}</p>
       <p style="font-size: 11px; margin: 5px 0; color: #666;">Итого порций: ${totalPortions}</p>
     </div>
 
     <table style="width: 100%; border-collapse: collapse; font-size: 9px;">
       <thead>
-        <tr style="background-color: #805ad5; color: white;">
+        <tr style="background-color: #000000; color: white;">
           <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Время</th>
           <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Класс</th>
           <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">Присутствует</th>
@@ -58,7 +58,7 @@ export async function generateCanteenReport(
       </thead>
       <tbody>
         ${rows.map((row, index) => `
-          <tr style="${index % 2 === 0 ? 'background-color: #f5f0ff;' : ''}">
+          <tr style="${index % 2 === 0 ? 'background-color: #f5f5f5;' : ''}">
             <td style="padding: 6px; border: 1px solid #ddd;">${row.time}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${row.className}</td>
             <td style="padding: 6px; text-align: center; border: 1px solid #ddd;">${row.presentCount}</td>
@@ -70,17 +70,17 @@ export async function generateCanteenReport(
     </table>
 
     <div style="margin-top: 50px;">
-      <hr style="border: none; border-top: 1px solid #805ad5; margin: 20px 0;">
+      <hr style="border: none; border-top: 1px solid #000000; margin: 20px 0;">
       <div style="display: flex; justify-content: space-between; align-items: flex-end;">
         <div>
-          <p style="font-size: 11px; margin: 0; color: #333; font-weight: bold;">Директор</p>
+          <p style="font-size: 11px; margin: 0; color: #000000; font-weight: bold;">Директор</p>
           <div style="border-bottom: 1px solid #999; width: 60px; margin: 10px 0;"></div>
           <p style="font-size: 9px; margin: 0; color: #666;">(подпись)</p>
         </div>
         <div style="text-align: center;">
-          <div style="width: 60px; height: 60px; border: 2px solid #805ad5; border-radius: 50%; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-            <p style="font-size: 8px; margin: 0; color: #805ad5; font-weight: bold;">ПЕЧАТЬ</p>
-            <p style="font-size: 6px; margin: 0; color: #805ad5;">Школа Aqbobek</p>
+          <div style="width: 60px; height: 60px; border: 2px solid #000000; border-radius: 50%; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+            <p style="font-size: 8px; margin: 0; color: #000000; font-weight: bold;">ПЕЧАТЬ</p>
+            <p style="font-size: 6px; margin: 0; color: #000000;">Школа Aqbobek</p>
           </div>
         </div>
       </div>

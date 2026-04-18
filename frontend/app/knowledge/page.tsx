@@ -148,7 +148,8 @@ export default function KnowledgePage() {
       broadcast: { status: "idle" },
     });
     try {
-      const resp = await fetch("/api/rag/simplify", {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+      const resp = await fetch(`${API_BASE}/api/rag/simplify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),

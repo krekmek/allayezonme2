@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, XCircle, UserCheck } from "lucide-react";
+import { CheckCircle2, Clock, XCircle, UserCheck, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type Staff = { id: number; fio: string; specialization: string | null };
@@ -46,6 +46,10 @@ export function SubstitutionsLive() {
     }
   }
 
+  function handleDelete(id: number) {
+    setSubs((prev) => prev.filter((s) => s.id !== id));
+  }
+
   useEffect(() => {
     loadSubs();
 
@@ -80,14 +84,16 @@ export function SubstitutionsLive() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {subs.map((sub) => (
-          <SubCard key={sub.id} sub={sub} />
+          <SubCard key={sub.id} sub={sub} onDelete={handleDelete} />
         ))}
       </div>
     </section>
   );
 }
 
-function SubCard({ sub }: { sub: Substitution }) {
+function SubCard({ sub, onDelete }: { sub: Substitution; onDelete: (id: number) => void }) {
+  const [deleting, setDeleting] = useState(false);
+
   const styles = {
     pending: {
       dotColor: "bg-yellow-500",
@@ -103,6 +109,24 @@ function SubCard({ sub }: { sub: Substitution }) {
     },
   }[sub.status];
 
+  async function handleDelete() {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+      const resp = await fetch(`${API_BASE}/api/substitutions/${sub.id}`, {
+        method: "DELETE",
+      });
+      if (resp.ok) {
+        onDelete(sub.id);
+      }
+    } catch (e) {
+      console.error("Failed to delete substitution:", e);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div
       className="rounded-md border border-border bg-card/50 p-4 transition-all animate-in fade-in"
@@ -112,9 +136,20 @@ function SubCard({ sub }: { sub: Substitution }) {
           <span className={`w-2 h-2 rounded-full ${styles.dotColor}`} />
           <span className="text-foreground">{styles.label}</span>
         </div>
-        <div className="text-xs text-muted-foreground">
-          {sub.class_name ? `Класс ${sub.class_name}` : "Класс —"} · Урок{" "}
-          {sub.lesson_number ?? "—"}
+        <div className="flex items-center gap-2">
+          <div className="text-xs text-muted-foreground">
+            {sub.class_name ? `Класс ${sub.class_name}` : "Класс —"} · Урок{" "}
+            {sub.lesson_number ?? "—"}
+          </div>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="text-muted-foreground hover:text-red-500 transition disabled:opacity-50"
+            title="Удалить заявку"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
