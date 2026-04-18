@@ -355,3 +355,119 @@ async def ingest_pdf_from_path(pdf_path: str | Path, *, replace: bool = False) -
         raise FileNotFoundError(f"PDF не найден: {path}")
     data = path.read_bytes()
     return await ingest_pdf_document(data, path.name, replace=replace)
+
+
+async def find_free_slot(
+    staff_id: int,
+    day_of_week: int,
+    preferred_lesson: int | None = None,
+) -> int | None:
+    """Найти ближайший свободный слот в расписании сотрудника на указанный день.
+
+    Если preferred_lesson указан — сначала проверяем его, иначе ищем первый свободный.
+    Возвращает lesson_number (1-7) или None, если нет свободных слотов.
+    """
+    def _run() -> int | None:
+        # Получаем все занятые слоты сотрудника на этот день
+        resp = (
+            supabase.table("schedules")
+            .select("lesson_number")
+            .eq("teacher_id", staff_id)
+            .eq("day_of_week", day_of_week)
+            .execute()
+        )
+        occupied = {row["lesson_number"] for row in resp.data or []}
+
+        # Если preferred_lesson свободен — возвращаем его
+        if preferred_lesson and preferred_lesson not in occupied:
+            return preferred_lesson
+
+        # Ищем первый свободный слот от 1 до 7
+        for lesson in range(1, 8):
+            if lesson not in occupied:
+                return lesson
+
+        return None
+
+    return await asyncio.to_thread(_run)
+
+
+async def auto_slot_task(
+    task_id: int,
+    staff_id: int,
+    day_of_week: int,
+    preferred_lesson: int | None = None,
+) -> dict[str, Any] | None:
+    """Автоматически занять свободный слот в расписании для задачи.
+
+    Создаёт запись в schedules с type='task' и связывает с task_id.
+    """
+    def _run() -> dict[str, Any] | None:
+        # Получаем информацию о задаче
+        task_resp = (
+            supabase.table("tasks")
+            .select("*")
+            .eq("id", task_id)
+            .limit(1)
+            .execute()
+        )
+        if not task_resp.data:
+            return None
+        task = task_resp.data[0]
+
+        # Находим свободный слот
+        lesson = None
+        for lesson_num in [preferred_lesson, None]:
+            if lesson_num is None:
+                continue
+            occupied_resp = (
+                supabase.table("schedules")
+                .select("lesson_number")
+                .eq("teacher_id", staff_id)
+                .eq("day_of_week", day_of_week)
+                .execute()
+            )
+            occupied = {row["lesson_number"] for row in occupied_resp.data or []}
+            if lesson_num not in occupied:
+                lesson = lesson_num
+                break
+
+        if lesson is None:
+            # Ищем любой свободный слот
+            for lesson_num in range(1, 8):
+                occupied_resp = (
+                    supabase.table("schedules")
+                    .select("lesson_number")
+                    .eq("teacher_id", staff_id)
+                    .eq("day_of_week", day_of_week)
+                    .execute()
+                )
+                occupied = {row["lesson_number"] for row in occupied_resp.data or []}
+                if lesson_num not in occupied:
+                    lesson = lesson_num
+                    break
+
+        if lesson is None:
+            return None  # Нет свободных слотов
+
+        # Создаём запись в schedules
+        schedule_resp = (
+            supabase.table("schedules")
+            .insert({
+                "type": "task",
+                "task_id": task_id,
+                "teacher_id": staff_id,
+                "day_of_week": day_of_week,
+                "lesson_number": lesson,
+                "class_name": None,  # Задачи не привязаны к классам
+                "room": None,  # Задачи могут быть без кабинета
+                "subject": task.get("title", "Задача"),
+                "title": task.get("title"),
+                "description": task.get("description"),
+            })
+            .execute()
+        )
+
+        return (schedule_resp.data or [{}])[0]
+
+    return await asyncio.to_thread(_run)

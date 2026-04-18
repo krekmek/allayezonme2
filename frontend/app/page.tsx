@@ -5,6 +5,7 @@ import { Activity, AlertTriangle, CalendarDays, BookOpenText, Trophy } from "luc
 import { supabase } from "@/lib/supabase";
 import { EmergencyAlerts } from "@/components/emergency-alerts";
 import { SubstitutionsLive } from "@/components/substitutions-live";
+import { NlpLiveFeed } from "@/components/nlp-live-feed";
 
 const cards = [
   {
@@ -105,6 +106,8 @@ export default function HomePage() {
       <EmergencyAlerts />
 
       <SubstitutionsLive />
+
+      <NlpLiveFeed />
 
       <section className="bg-card border border-border rounded-md p-6">
         <div className="flex items-center gap-2 mb-4">

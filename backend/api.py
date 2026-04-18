@@ -391,6 +391,24 @@ async def get_staff_list() -> list[dict[str, Any]]:
     return await list_staff()
 
 
+@app.get("/api/telegram-messages")
+async def get_telegram_messages() -> list[dict[str, Any]]:
+    """Получить последние Telegram-сообщения с NLP-анализом для витрины."""
+    from db import supabase
+
+    def _run():
+        resp = (
+            supabase.table("telegram_messages")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        return resp.data or []
+
+    return await asyncio.to_thread(_run)
+
+
 class CreateAbsenceRequest(BaseModel):
     teacher_id: int
     reason_text: str | None = None
@@ -530,6 +548,196 @@ async def create_task(request: CreateTaskRequest) -> dict[str, Any]:
         await notifications.send_task_notification(task)
     
     return task
+
+
+# ==================== Schedule Generator (CP-SAT) ====================
+
+
+class BandInput(BaseModel):
+    name: str
+    classes: list[str]
+    subject: str
+    hours_per_week: int
+    teachers: list[int]
+    rooms: list[str]
+
+
+class GenerateScheduleRequest(BaseModel):
+    class_names: list[str] | None = None
+    curriculum_overrides: dict[str, dict[str, int]] | None = None
+    bands: list[BandInput] | None = None
+    days: int = 5
+    periods_per_day: int = 7
+    time_limit_sec: int = 30
+    dry_run: bool = False
+
+
+@app.post("/api/schedule/generate")
+async def generate_schedule_endpoint(request: GenerateScheduleRequest) -> dict[str, Any]:
+    """Сгенерировать школьное расписание 'с нуля' CP-SAT солвером.
+
+    Если `dry_run=false` (по умолчанию), текущая таблица `schedules` будет
+    очищена и заменена новым расписанием. В `master_schedule` обновятся
+    только строки с task_type='lesson'.
+    """
+    from scheduler_service import regenerate_schedule
+
+    bands_input = None
+    if request.bands:
+        bands_input = [b.model_dump() for b in request.bands]
+
+    result = await regenerate_schedule(
+        class_names=request.class_names,
+        curriculum_overrides=request.curriculum_overrides,
+        bands_input=bands_input,
+        days=request.days,
+        periods_per_day=request.periods_per_day,
+        time_limit_sec=request.time_limit_sec,
+        dry_run=request.dry_run,
+    )
+    return result
+
+
+# ==================== Schedule Validation (DnD) ====================
+
+
+class ValidateScheduleMoveRequest(BaseModel):
+    schedule_id: int
+    target_day_of_week: int
+    target_lesson_number: int
+    target_class_name: str | None = None  # по умолчанию — не меняем класс
+    target_room: str | None = None         # по умолчанию — не меняем кабинет
+
+
+@app.post("/api/schedule/validate")
+async def validate_schedule_move(req: ValidateScheduleMoveRequest) -> dict[str, Any]:
+    """Проверка конфликтов при перетаскивании урока.
+
+    Возвращает:
+        {
+            "ok": bool,
+            "conflicts": [{"type": str, "message": str}, ...],
+            "source": {...}   # оригинальный урок
+        }
+
+    Проверки:
+        * учитель не занят в (target_day, target_lesson) в другой записи;
+        * кабинет свободен в (target_day, target_lesson);
+        * класс не имеет другого урока в (target_day, target_lesson);
+        * нарушение «ленты»: если исходный урок — часть ленты, перемещение
+          по-одному ломает параллельность (мягкое предупреждение).
+    """
+    from db import supabase
+    def _run() -> dict[str, Any]:
+        # 1. Загружаем исходный урок
+        src_resp = (
+            supabase.table("schedules")
+            .select("*")
+            .eq("id", req.schedule_id)
+            .limit(1)
+            .execute()
+        )
+        if not src_resp.data:
+            return {
+                "ok": False,
+                "conflicts": [{"type": "not_found", "message": "Урок не найден"}],
+            }
+        src = src_resp.data[0]
+
+        target_day = req.target_day_of_week
+        target_lesson = req.target_lesson_number
+        target_class = req.target_class_name or src.get("class_name")
+        target_room = req.target_room if req.target_room is not None else src.get("room")
+
+        # Если не меняется — всё ок
+        if (
+            src.get("day_of_week") == target_day
+            and src.get("lesson_number") == target_lesson
+            and src.get("class_name") == target_class
+        ):
+            return {"ok": True, "conflicts": [], "source": src}
+
+        conflicts: list[dict[str, str]] = []
+
+        # 2. Есть ли другой урок в той же (class, day, lesson)
+        same_slot = (
+            supabase.table("schedules")
+            .select("id, class_name, lesson_number, day_of_week, subject, teacher_id, room")
+            .eq("class_name", target_class)
+            .eq("day_of_week", target_day)
+            .eq("lesson_number", target_lesson)
+            .execute()
+        )
+        for row in same_slot.data or []:
+            if row["id"] != src["id"]:
+                conflicts.append({
+                    "type": "class_busy",
+                    "message": (
+                        f"У класса {target_class} уже есть урок "
+                        f"'{row.get('subject')}' в {target_day}-й день, "
+                        f"{target_lesson}-й урок"
+                    ),
+                })
+
+        # 3. Учитель занят в (day, lesson) в другом классе
+        if src.get("teacher_id"):
+            teacher_busy = (
+                supabase.table("schedules")
+                .select("id, class_name, subject, day_of_week, lesson_number")
+                .eq("teacher_id", src["teacher_id"])
+                .eq("day_of_week", target_day)
+                .eq("lesson_number", target_lesson)
+                .execute()
+            )
+            for row in teacher_busy.data or []:
+                if row["id"] != src["id"]:
+                    conflicts.append({
+                        "type": "teacher_busy",
+                        "message": (
+                            f"Учитель уже ведёт '{row.get('subject')}' "
+                            f"в классе {row.get('class_name')} в этот слот"
+                        ),
+                    })
+
+        # 4. Кабинет занят
+        if target_room:
+            room_busy = (
+                supabase.table("schedules")
+                .select("id, class_name, subject, teacher_id")
+                .eq("room", target_room)
+                .eq("day_of_week", target_day)
+                .eq("lesson_number", target_lesson)
+                .execute()
+            )
+            for row in room_busy.data or []:
+                if row["id"] != src["id"]:
+                    conflicts.append({
+                        "type": "room_busy",
+                        "message": (
+                            f"Кабинет {target_room} занят уроком "
+                            f"'{row.get('subject')}' в классе {row.get('class_name')}"
+                        ),
+                    })
+
+        # 5. Проверка «ленты»: если subject содержит маркер '(лента ...)',
+        # перемещение одного урока сломает параллельность — это soft-conflict.
+        subject = (src.get("subject") or "").lower()
+        if "(лента" in subject or "[лента" in subject:
+            conflicts.append({
+                "type": "band_break",
+                "message": (
+                    "Этот урок — часть ЛЕНТЫ параллели. "
+                    "Перемещение одного урока нарушит синхронность всех групп."
+                ),
+            })
+
+        return {
+            "ok": len(conflicts) == 0,
+            "conflicts": conflicts,
+            "source": src,
+        }
+
+    return await asyncio.to_thread(_run)
 
 
 # ==================== Twilio WhatsApp Webhook ====================

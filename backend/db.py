@@ -507,3 +507,58 @@ async def update_substitution_status(
         return (resp.data or [None])[0]
 
     return await asyncio.to_thread(_run)
+
+
+async def save_telegram_message(
+    message_id: int,
+    chat_id: int,
+    user_id: int | None,
+    username: str | None,
+    first_name: str | None,
+    last_name: str | None,
+    raw_text: str,
+    parsed_entities: dict[str, Any] | None,
+    intent: str | None,
+    confidence: float,
+    staff_id: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Сохранить Telegram-сообщение с NLP-анализом в таблицу telegram_messages."""
+    def _run() -> dict[str, Any]:
+        from datetime import datetime, timezone
+        payload: dict[str, Any] = {
+            "message_id": message_id,
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "username": username,
+            "first_name": first_name,
+            "last_name": last_name,
+            "raw_text": raw_text,
+            "parsed_entities": parsed_entities,
+            "intent": intent,
+            "confidence": confidence,
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if staff_id:
+            payload["staff_id"] = staff_id
+        if metadata:
+            payload["metadata"] = metadata
+        resp = supabase.table("telegram_messages").insert(payload).execute()
+        return (resp.data or [{}])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+async def list_telegram_messages(limit: int = 50) -> list[dict[str, Any]]:
+    """Получить последние Telegram-сообщения с NLP-анализом."""
+    def _run() -> list[dict[str, Any]]:
+        resp = (
+            supabase.table("telegram_messages")
+            .select("*, staff:fio")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+
+    return await asyncio.to_thread(_run)

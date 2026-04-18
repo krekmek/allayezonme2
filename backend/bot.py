@@ -35,12 +35,13 @@ from db import (
     get_substitution_by_id,
     get_teacher_points,
     list_staff,
+    save_telegram_message,
     search_tasks_by_date,
     update_substitution_status,
     update_task_status,
     upload_voice_note,
 )
-from logic import find_substitution, generate_tomorrow_substitution_draft
+from logic import find_substitution, generate_tomorrow_substitution_draft, auto_slot_task
 from nlp_processor import classify_message, extract_attendance_data
 from rag_service import generate_official_document
 from main import start_scheduler
@@ -381,6 +382,25 @@ async def _route_classified(
         msg_type, source, text, details, creator_tg_id,
     )
 
+    # Сохраняем сообщение с NLP-анализом для витрины
+    try:
+        await save_telegram_message(
+            message_id=message.message_id,
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name,
+            raw_text=text,
+            parsed_entities={"type": msg_type, "summary": summary, "details": details},
+            intent=msg_type,
+            confidence=result.get("confidence", 0.0),
+            staff_id=current_staff["id"] if current_staff else None,
+            metadata={"source": source, "creator_tg_id": creator_tg_id},
+        )
+    except Exception as exc:
+        logging.exception("Failed to save telegram message for NLP feed: %s", exc)
+
     if msg_type == "incident":
         location = details.get("location") or "не указано"
         issue = details.get("issue") or summary
@@ -427,12 +447,33 @@ async def _route_classified(
             logging.exception("Failed to save task")
             await message.answer(f"Не удалось сохранить задачу: {exc}")
             return
+
+        # Авто-слотирование: если есть исполнитель, находим свободный слот в расписании
+        slot_info = ""
+        if assignee:
+            try:
+                from datetime import datetime, timezone
+                today_dow = datetime.now(timezone.utc).isoweekday()
+                schedule_entry = await auto_slot_task(
+                    task_id=task["id"],
+                    staff_id=assignee,  # assignee здесь - это staff_id (из find_staff_by_name)
+                    day_of_week=today_dow,
+                )
+                if schedule_entry:
+                    slot_info = f"\n📅 Добавлено в расписание: урок {schedule_entry['lesson_number']}"
+                else:
+                    slot_info = "\n⚠️ Нет свободных слотов в расписании на сегодня"
+            except Exception as exc:  # noqa: BLE001
+                logging.exception("Failed to auto-slot task")
+                slot_info = f"\n⚠️ Ошибка добавления в расписание: {exc}"
+
         parts = [f"<b>Задача создана</b>", f"Описание: {title}"]
         if assignee:
             parts.append(f"Исполнитель: <i>{assignee}</i>")
         if due_date:
             parts.append(f"Срок: <i>{due_date}</i>")
         parts.append(f"ID: <code>{task.get('id')}</code>")
+        parts.append(slot_info)
         await message.answer("\n".join(parts))
         
         # Отправляем уведомление исполнителю, если указан
@@ -608,15 +649,20 @@ async def _handle_feeling_unwell(
     audio_bytes: bytes | None = None,
 ) -> None:
     """Обработать сообщение о плохом самочувствии учителя.
-    
+
     Создаёт запись в таблице absences, загружает голос в Storage (если есть),
     уведомляет директора и назначает замены.
+
+    Если фраза содержит "на весь день" — запускает каскадную замену для ВСЕХ уроков сегодня.
     """
     if not staff or staff.get("role") != ROLE_TEACHER:
         await message.answer(
             "Эта функция доступна только для учителей."
         )
         return
+
+    # Проверка на "на весь день" для каскадной замены
+    is_full_day = reason_text and "на весь день" in reason_text.lower()
 
     # 1. Загружаем аудио в Storage (если есть)
     voice_url: str | None = None
@@ -632,7 +678,7 @@ async def _handle_feeling_unwell(
             logging.info("Voice uploaded for absence: %s", voice_url)
         except Exception:  # noqa: BLE001
             logging.exception("Failed to upload voice note")
-    
+
     # 2. Создаём запись в absences
     try:
         absence = await create_absence(
@@ -643,6 +689,14 @@ async def _handle_feeling_unwell(
         logging.info("Absence created: %s", absence)
     except Exception:  # noqa: BLE001
         logging.exception("Failed to create absence record")
+
+    if is_full_day:
+        await message.answer(
+            "✅ <b>Уведомление отправлено директору</b>\n"
+            "Запускаю каскадную замену на весь день..."
+        )
+        await _cascade_substitution_for_full_day(message, staff, reason_text)
+        return
 
     await message.answer(
         "✅ <b>Уведомление отправлено директору</b>\n"
@@ -1018,39 +1072,7 @@ async def handle_free_text(message: Message, state: FSMContext) -> None:
         )
         return
 
-    # Сначала пробуем извлечь данные о посещаемости через GPT-4o-mini
-    await bot.send_chat_action(message.chat.id, "typing")
-    
-    attendance_data = await extract_attendance_data(message.text)
-    
-    if attendance_data and attendance_data.get("class_name"):
-        # Если извлечены данные о посещаемости - сохраняем в БД
-        class_name = attendance_data["class_name"]
-        present = attendance_data.get("present") or 0
-        absent = attendance_data.get("absent") or 0
-        
-        try:
-            await create_attendance_report(
-                class_name=class_name,
-                present_count=present,
-                absent_count=absent,
-                absent_list=[],
-                portions=present,
-                raw_text=message.text,
-                created_by_tg_id=message.from_user.id,
-            )
-            await message.answer(
-                f"✅ Отчёт по столовой сохранён:\n"
-                f"Класс: {class_name}\n"
-                f"Присутствует: {present}\n"
-                f"Отсутствует: {absent}"
-            )
-        except Exception as exc:  # noqa: BLE001
-            logging.exception("Failed to save attendance report")
-            await message.answer(f"Ошибка при сохранении отчёта: {exc}")
-        return
-    
-    # Если не удалось извлечь данные о посещаемости - используем старую логику
+    # Сначала полная NLP-классификация
     await _route_classified(message, message.text, source="text")
 
 
@@ -1391,6 +1413,116 @@ async def handle_impersonate_pick(query: CallbackQuery) -> None:
         "записи от этого имени. /logout — вернуться к себе."
     )
     await query.answer()
+
+
+async def _cascade_substitution_for_full_day(
+    message: Message,
+    staff: dict[str, Any],
+    reason_text: str | None,
+) -> None:
+    """Каскадная замена: найти все уроки учителя сегодня и подобрать замены."""
+    from datetime import datetime, timezone
+
+    # Определяем текущий день недели
+    now = datetime.now(timezone.utc)
+    day_of_week = now.isoweekday()  # 1=Пн, 7=Вс
+
+    # Находим все уроки учителя на сегодня
+    def _run():
+        return (
+            supabase.table("schedules")
+            .select("*")
+            .eq("teacher_id", staff["id"])
+            .eq("day_of_week", day_of_week)
+            .execute()
+        )
+
+    schedules_resp = await asyncio.to_thread(_run)
+    schedules = schedules_resp.data or []
+
+    if not schedules:
+        await message.answer(
+            f"У <b>{staff['fio']}</b> сегодня нет уроков — замены не требуются."
+        )
+        return
+
+    await message.answer(
+        f"Найдено <b>{len(schedules)}</b> уроков на сегодня.\n"
+        f"Подбираю замены с учётом нагрузки..."
+    )
+
+    substitutions_created = []
+    errors = []
+
+    for sched in schedules:
+        try:
+            candidates = await find_substitution(
+                staff["id"],
+                sched["lesson_number"],
+                day_of_week,
+            )
+
+            if not candidates:
+                errors.append(
+                    f"Урок {sched['lesson_number']} ({sched['class_name']}): "
+                    "нет свободных учителей"
+                )
+                continue
+
+            # Берём первого кандидата (можно улучшить: выбирать с наименьшей нагрузкой)
+            best_candidate = candidates[0]
+
+            # Создаём запись о замене
+            sub = await create_substitution(
+                absent_teacher_id=staff["id"],
+                substitute_teacher_id=best_candidate["id"],
+                lesson_number=sched["lesson_number"],
+                class_name=sched["class_name"],
+                day_of_week=day_of_week,
+                reason=reason_text or "Болеет на весь день",
+            )
+
+            substitutions_created.append(
+                f"• {sched['class_name']}, урок {sched['lesson_number']} → {best_candidate['fio']}"
+            )
+
+            # Уведомляем замену (если есть telegram_id)
+            if best_candidate.get("telegram_id"):
+                try:
+                    await bot.send_message(
+                        best_candidate["telegram_id"],
+                        f"📢 <b>Замена</b>\n"
+                        f"Класс: {sched['class_name']}, урок {sched['lesson_number']}\n"
+                        f"Отсутствует: {staff['fio']}\n"
+                        f"Причина: {reason_text or 'Болеет на весь день'}"
+                    )
+                except Exception as exc:
+                    logging.exception("Failed to notify substitute: %s", exc)
+
+        except Exception as exc:
+            logging.exception("Failed to process lesson %s", sched["id"])
+            errors.append(
+                f"Урок {sched['lesson_number']} ({sched['class_name']}): ошибка {exc}"
+            )
+
+    # Формируем итоговое сообщение
+    lines = [
+        f"<b>Каскадная замена завершена</b>",
+        f"Учитель: {staff['fio']}",
+        f"День: {day_of_week} (сегодня)",
+        f"",
+    ]
+
+    if substitutions_created:
+        lines.append(f"✅ Создано замен: {len(substitutions_created)}")
+        lines.extend(substitutions_created)
+
+    if errors:
+        lines.append("")
+        lines.append(f"⚠️ Ошибок: {len(errors)}")
+        lines.extend(errors)
+
+    await message.answer("\n".join(lines))
 
 
 # ---------------------- entrypoint ----------------------
