@@ -11,3 +11,4 @@ python-multipart
 pypdf>=4.0.0
 langchain-text-splitters>=0.2.0
 ortools>=9.10.0
+apscheduler>=3.10.0
