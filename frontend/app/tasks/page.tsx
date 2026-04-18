@@ -174,7 +174,7 @@ export default function TasksPage() {
             return (
               <div
                 key={col.key}
-                className="bg-surface border border-neon rounded-xl flex flex-col min-h-[400px]"
+                className="border-gradient bg-surface rounded-lg p-4 hover:border-neon transition"
               >
                 <div className="px-5 py-4 border-b border-neon flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -227,10 +227,10 @@ function TaskCard({
   const next = NEXT[task.status];
   return (
     <div
-      className={`rounded-lg border p-3 bg-background/40 transition ${
+      className={`border-gradient bg-surface p-3 transition ${
         isPulsing
           ? "border-neon animate-pulse-neon shadow-neon"
-          : "border-neon/40 hover:border-neon"
+          : ""
       } ${isUpdating ? "opacity-60" : ""}`}
     >
       <p className="text-sm leading-snug mb-2 break-words">{task.description}</p>

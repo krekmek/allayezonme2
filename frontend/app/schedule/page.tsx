@@ -345,11 +345,11 @@ function SubstitutionModal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4"
       onClick={onClose}
     >
       <div
-        className="bg-surface border border-neon rounded-xl w-full max-w-lg shadow-neon"
+        className="border-gradient modal-content rounded-xl w-full max-w-lg shadow-neon"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-neon">
@@ -389,28 +389,42 @@ function SubstitutionModal({
               {data.candidates.map((c) => (
                 <li
                   key={c.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-neon/40 bg-background/40 px-4 py-3 hover:border-neon transition"
+                  className="flex flex-col gap-2 rounded-lg border border-neon/40 bg-background/40 px-4 py-3 hover:border-neon transition"
                 >
-                  <div>
-                    <div className="font-medium flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                      {c.fio}
-                    </div>
-                    {c.specialization && (
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {c.specialization}
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                        {c.fio}
                       </div>
+                      {c.specialization && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {c.specialization}
+                        </div>
+                      )}
+                    </div>
+                    {c.telegram_id ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-primary">
+                        <Phone className="h-3.5 w-3.5" />
+                        tg: {c.telegram_id}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        без TG
+                      </span>
                     )}
                   </div>
-                  {c.telegram_id ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-primary">
-                      <Phone className="h-3.5 w-3.5" />
-                      tg: {c.telegram_id}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      без TG
-                    </span>
+                  {c.warnings && c.warnings.length > 0 && (
+                    <div className="flex flex-col gap-1 mt-1">
+                      {c.warnings.map((warning, idx) => (
+                        <div
+                          key={idx}
+                          className="text-xs text-red-400 font-medium"
+                        >
+                          ⚠️ {warning}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </li>
               ))}

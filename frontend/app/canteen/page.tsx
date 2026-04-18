@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Utensils, Users, TrendingUp, Clock } from "lucide-react";
+import { Utensils, Users, TrendingUp, Clock, Download } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { generateCanteenReport } from "@/lib/generateCanteenReport";
 
 type AttendanceReport = {
   id: number;
@@ -108,10 +109,20 @@ export default function CanteenPage() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight text-glow flex items-center gap-3">
-          <Utensils className="h-8 w-8 text-neon" />
-          Столовая
-        </h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-4xl font-bold tracking-tight text-glow flex items-center gap-3">
+            <Utensils className="h-8 w-8 text-neon" />
+            Столовая
+          </h1>
+          <button
+            onClick={async () => await generateCanteenReport(rows, totalPortions, new Date())}
+            disabled={rows.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-neon rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download className="h-4 w-4" />
+            Скачать PDF
+          </button>
+        </div>
         <p className="text-muted-foreground">
           Присутствие в реальном времени. Данные поступают от учителей через Telegram-бот.
         </p>

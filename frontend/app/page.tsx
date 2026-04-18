@@ -1,4 +1,9 @@
-import { Activity, AlertTriangle, CalendarDays, BookOpenText } from "lucide-react";
+"use client";
+
+import { useEffect, useState } from "react";
+import { Activity, AlertTriangle, CalendarDays, BookOpenText, Trophy } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { EmergencyAlerts } from "@/components/emergency-alerts";
 
 const cards = [
   {
@@ -27,7 +32,39 @@ const cards = [
   },
 ];
 
+type TopTeacher = {
+  id: number;
+  staff_id: number;
+  points: number;
+  reports_before_09_count: number;
+  staff: {
+    fio: string;
+    specialization: string | null;
+  };
+};
+
 export default function HomePage() {
+  const [topTeachers, setTopTeachers] = useState<TopTeacher[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadTopTeachers() {
+      const { data, error } = await supabase
+        .from("teacher_points")
+        .select("*, staff(fio, specialization)")
+        .order("points", { ascending: false })
+        .limit(3);
+      
+      if (error) {
+        console.error("Error loading top teachers:", error);
+      } else {
+        setTopTeachers(data as TopTeacher[]);
+      }
+      setLoading(false);
+    }
+    loadTopTeachers();
+  }, []);
+
   return (
     <div className="space-y-8">
       <header className="space-y-2">
@@ -45,7 +82,7 @@ export default function HomePage() {
           return (
             <div
               key={c.title}
-              className="bg-surface border border-neon rounded-xl p-5 transition hover:shadow-neon hover:-translate-y-0.5"
+              className="border-gradient bg-surface rounded-xl p-5 transition hover:shadow-neon hover:-translate-y-0.5"
             >
               <div className="flex items-start justify-between">
                 <div>
@@ -63,6 +100,47 @@ export default function HomePage() {
           );
         })}
       </div>
+
+      <EmergencyAlerts />
+
+      <section className="bg-surface border border-neon rounded-xl p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Trophy className="h-5 w-5 text-amber-400" />
+          <h2 className="text-xl font-semibold">Топ учителей по оперативности</h2>
+        </div>
+        {loading ? (
+          <p className="text-muted-foreground">Загрузка...</p>
+        ) : topTeachers.length === 0 ? (
+          <p className="text-muted-foreground">Нет данных</p>
+        ) : (
+          <div className="space-y-3">
+            {topTeachers.map((teacher, index) => (
+              <div
+                key={teacher.id}
+                className="flex items-center justify-between p-4 bg-background/40 rounded-lg border border-neon/40"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/20 text-primary font-bold">
+                    {index + 1}
+                  </div>
+                  <div>
+                    <p className="font-medium">{teacher.staff.fio}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {teacher.staff.specialization || "Учитель"}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-bold text-glow">{teacher.points}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {teacher.reports_before_09_count} отчётов до 09:00
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="bg-surface border border-neon rounded-xl p-6">
         <h2 className="text-xl font-semibold mb-4">Добро пожаловать</h2>
