@@ -6,6 +6,8 @@ export type Staff = {
   role: string;
   specialization: string | null;
   telegram_id: number | null;
+  weekly_load?: number;
+  max_load?: number;
   warnings?: string[];
 };
 
@@ -56,7 +58,9 @@ export async function findSubstitution(
   // 2. Кандидаты с той же специализацией
   const { data: candidates, error: candErr } = await supabase
     .from("staff")
-    .select("id, fio, telegram_id, role, specialization")
+    .select(
+      "id, fio, telegram_id, role, specialization, weekly_load, max_load"
+    )
     .eq("role", "teacher")
     .eq("specialization", absent.specialization)
     .neq("id", absentTeacherId);
@@ -88,6 +92,19 @@ export async function findSubstitution(
     }
 
     const warnings: string[] = [];
+
+    // Проверка недельной нагрузки (weekly_load / max_load)
+    const weeklyLoad = candidate.weekly_load ?? 0;
+    const maxLoad = candidate.max_load ?? 0;
+    if (maxLoad > 0 && weeklyLoad >= maxLoad) {
+      // Перегружен — пропускаем, чтобы не нарушать норму
+      continue;
+    }
+    if (maxLoad > 0 && weeklyLoad >= maxLoad * 0.9) {
+      warnings.push(
+        `Близко к лимиту нагрузки (${weeklyLoad}ч из ${maxLoad}ч)`
+      );
+    }
 
     // Проверка кабинета на соседних уроках
     if (dayOfWeek !== undefined && dayOfWeek !== null && absentRoom) {

@@ -69,7 +69,7 @@ export default function HomePage() {
   return (
     <div className="space-y-8">
       <header className="space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight text-glow">
+        <h1 className="text-4xl font-bold tracking-tight text-neon">
           Мониторинг
         </h1>
         <p className="text-muted-foreground">
@@ -83,12 +83,12 @@ export default function HomePage() {
           return (
             <div
               key={c.title}
-              className="border-gradient bg-surface rounded-xl p-5 transition hover:shadow-neon hover:-translate-y-0.5"
+              className="border border-border bg-card rounded-md p-5 transition hover:shadow-neon hover:-translate-y-0.5"
             >
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">{c.title}</p>
-                  <p className="mt-2 text-3xl font-semibold text-glow">
+                  <p className="mt-2 text-3xl font-semibold text-neon">
                     {c.value}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">{c.hint}</p>
@@ -106,10 +106,10 @@ export default function HomePage() {
 
       <SubstitutionsLive />
 
-      <section className="bg-surface border border-neon rounded-xl p-6">
+      <section className="bg-card border border-border rounded-md p-6">
         <div className="flex items-center gap-2 mb-4">
-          <Trophy className="h-5 w-5 text-amber-400" />
-          <h2 className="text-xl font-semibold">Топ учителей по оперативности</h2>
+          <Trophy className="h-5 w-5 text-neon" />
+          <h2 className="text-xl font-semibold text-foreground">Топ учителей по оперативности</h2>
         </div>
         {loading ? (
           <p className="text-muted-foreground">Загрузка...</p>
@@ -120,7 +120,7 @@ export default function HomePage() {
             {topTeachers.map((teacher, index) => (
               <div
                 key={teacher.id}
-                className="flex items-center justify-between p-4 bg-background/40 rounded-lg border border-neon/40"
+                className="flex items-center justify-between p-4 bg-background/40 rounded-md border border-border"
               >
                 <div className="flex items-center gap-3">
                   <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/20 text-primary font-bold">
@@ -134,7 +134,7 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-2xl font-bold text-glow">{teacher.points}</p>
+                  <p className="text-2xl font-bold text-neon">{teacher.points}</p>
                   <p className="text-xs text-muted-foreground">
                     {teacher.reports_before_09_count} отчётов до 09:00
                   </p>
@@ -145,8 +145,8 @@ export default function HomePage() {
         )}
       </section>
 
-      <section className="bg-surface border border-neon rounded-xl p-6">
-        <h2 className="text-xl font-semibold mb-4">Добро пожаловать</h2>
+      <section className="bg-card border border-border rounded-md p-6">
+        <h2 className="text-xl font-semibold text-foreground mb-4">Добро пожаловать</h2>
         <p className="text-muted-foreground">
           Это каркас админ-панели. Навигация слева: Мониторинг, Инциденты,
           Расписание, База знаний. Страницы подключим следующим шагом.

@@ -1,12 +1,10 @@
-"""Бизнес-логика: подбор замены учителю, статистика и т.п.
-
-Пока содержит `find_substitution` — поиск учителей, которые могут заменить
-отсутствующего коллегу на конкретном уроке.
-"""
+"""Бизнес-логика: подбор замены учителю, RAG-ingestion PDF-приказов и пр."""
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
 from db import supabase
@@ -63,7 +61,10 @@ async def find_substitution(
 
         candidates_resp = (
             supabase.table("staff")
-            .select("id, fio, telegram_id, role, specialization")
+            .select(
+                "id, fio, telegram_id, role, specialization, "
+                "weekly_load, max_load"
+            )
             .eq("role", "teacher")
             .eq("specialization", specialization)
             .neq("id", absent_teacher_id)
@@ -93,9 +94,21 @@ async def find_substitution(
             if c["id"] in busy_ids:
                 # Учитель занят на этом уроке - не подходит
                 continue
-            
+
             warnings = []
-            
+
+            # Проверка недельной нагрузки по закону (weekly_load / max_load).
+            # Жёсткое правило: если уже достигнут максимум — не предлагаем вообще.
+            weekly_load = c.get("weekly_load") or 0
+            max_load = c.get("max_load") or 0
+            if max_load > 0 and weekly_load >= max_load:
+                # Перегружен — пропускаем, чтобы не нарушать норму
+                continue
+            if max_load > 0 and weekly_load >= max_load * 0.9:
+                warnings.append(
+                    f"Близко к лимиту нагрузки ({weekly_load}ч из {max_load}ч)"
+                )
+
             # Проверка кабинета на соседних уроках (предыдущий и следующий)
             if day_of_week is not None and absent_room:
                 for adjacent_lesson in [lesson_number - 1, lesson_number + 1]:
@@ -198,3 +211,147 @@ async def generate_tomorrow_substitution_draft(
         }
 
     return await asyncio.to_thread(_run)
+
+
+# =========================================================================
+# RAG: загрузка PDF-приказов в document_chunks с эмбеддингами OpenAI
+# =========================================================================
+
+_EMBEDDING_MODEL = "text-embedding-3-small"  # 1536 dim
+_CHUNK_SIZE = 800
+_CHUNK_OVERLAP = 150
+_EMBED_BATCH_SIZE = 64
+
+
+def _extract_pdf_text(pdf_bytes: bytes) -> str:
+    """Извлечь текст из байтов PDF."""
+    from io import BytesIO
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(pdf_bytes))
+    pages: list[str] = []
+    for page in reader.pages:
+        try:
+            t = page.extract_text() or ""
+        except Exception:
+            t = ""
+        if t.strip():
+            pages.append(t)
+    full = "\n\n".join(pages)
+    full = re.sub(r"[ \t]+", " ", full)
+    full = re.sub(r"\n{3,}", "\n\n", full)
+    return full.strip()
+
+
+def _split_chunks(text: str) -> list[str]:
+    """Разбить текст на чанки с нахлёстом (RecursiveCharacterTextSplitter)."""
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=_CHUNK_SIZE,
+        chunk_overlap=_CHUNK_OVERLAP,
+        separators=["\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ", ""],
+        length_function=len,
+    )
+    return splitter.split_text(text)
+
+
+async def ingest_pdf_document(
+    pdf_bytes: bytes,
+    source_name: str,
+    *,
+    replace: bool = False,
+) -> dict[str, Any]:
+    """Загрузить PDF-документ в таблицу document_chunks с эмбеддингами OpenAI.
+
+    Args:
+        pdf_bytes: содержимое PDF-файла.
+        source_name: имя файла/источника (например, "Приказ_130.pdf").
+        replace: если True — сначала удалить существующие чанки с тем же source.
+
+    Returns:
+        {"source": ..., "chunks_inserted": N, "total_chars": M, "decree_number": "130"}
+    """
+    from openai import OpenAI
+    from config import settings
+
+    if not settings.OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY не настроен в .env")
+
+    def _run() -> dict[str, Any]:
+        # 1. PDF → текст
+        text = _extract_pdf_text(pdf_bytes)
+        if not text:
+            return {
+                "source": source_name,
+                "chunks_inserted": 0,
+                "total_chars": 0,
+                "decree_number": None,
+                "error": "Пустой текст в PDF",
+            }
+
+        # 2. Разбиение на чанки
+        chunks = _split_chunks(text)
+        if not chunks:
+            return {
+                "source": source_name,
+                "chunks_inserted": 0,
+                "total_chars": len(text),
+                "decree_number": None,
+                "error": "Не удалось разбить текст",
+            }
+
+        # 3. Номер приказа из имени
+        m = re.search(r"(\d+)", source_name)
+        decree_number = m.group(1) if m else None
+
+        # 4. Удаление старых чанков, если replace
+        if replace:
+            supabase.table("document_chunks").delete().eq(
+                "metadata->>source", source_name
+            ).execute()
+
+        # 5. Эмбеддинги + вставка батчами
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        total = len(chunks)
+        inserted = 0
+        for start in range(0, total, _EMBED_BATCH_SIZE):
+            batch = chunks[start : start + _EMBED_BATCH_SIZE]
+            resp = client.embeddings.create(model=_EMBEDDING_MODEL, input=batch)
+            vectors = [item.embedding for item in resp.data]
+
+            rows = []
+            for offset, (content, embedding) in enumerate(zip(batch, vectors)):
+                idx = start + offset
+                rows.append(
+                    {
+                        "content": content,
+                        "metadata": {
+                            "source": source_name,
+                            "decree_number": decree_number,
+                            "chunk_index": idx,
+                            "total_chunks": total,
+                        },
+                        "embedding": embedding,
+                    }
+                )
+            supabase.table("document_chunks").insert(rows).execute()
+            inserted += len(rows)
+
+        return {
+            "source": source_name,
+            "chunks_inserted": inserted,
+            "total_chars": len(text),
+            "decree_number": decree_number,
+        }
+
+    return await asyncio.to_thread(_run)
+
+
+async def ingest_pdf_from_path(pdf_path: str | Path, *, replace: bool = False) -> dict[str, Any]:
+    """Обёртка: прочитать PDF с диска и вызвать ingest_pdf_document."""
+    path = Path(pdf_path)
+    if not path.exists():
+        raise FileNotFoundError(f"PDF не найден: {path}")
+    data = path.read_bytes()
+    return await ingest_pdf_document(data, path.name, replace=replace)

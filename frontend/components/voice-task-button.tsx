@@ -21,7 +21,7 @@ type Status =
   | { kind: "recording"; transcript: string; interim: string }
   | { kind: "processing"; transcript: string }
   | { kind: "success"; transcript: string; tasks: Task[] }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; reason?: string; transcript?: string };
 
 // Минимальные типы для Web Speech API
 type SpeechRecognitionResultList = {
@@ -182,10 +182,16 @@ export function VoiceTaskButton() {
       });
       const data = await resp.json();
 
-      if (!resp.ok) {
+      // Intent Guard отклонил задачу
+      if (!resp.ok || data?.valid === false) {
+        const baseMsg =
+          "ИИ не распознал задачу. Пожалуйста, уточните распоряжение";
+        const details = data?.error || data?.message;
         setStatus({
           kind: "error",
-          message: data?.error || "Ошибка сервера",
+          message: details ? `${baseMsg}: ${details}` : baseMsg,
+          reason: data?.reason,
+          transcript,
         });
         return;
       }
@@ -230,17 +236,17 @@ export function VoiceTaskButton() {
         aria-label={
           isRecording ? "Остановить запись" : "Записать задачу голосом"
         }
-        className={`relative h-11 w-11 rounded-full border shadow-neon flex items-center justify-center transition
+        className={`relative h-11 w-11 rounded-md border shadow-md flex items-center justify-center transition
           ${
             isRecording
               ? "bg-red-500/20 border-red-500 text-red-200 animate-pulse"
               : isProcessing
-              ? "bg-primary/15 border-neon text-primary opacity-60"
-              : "bg-primary/15 border-neon text-primary hover:bg-primary/25 hover:scale-105"
+              ? "bg-card border-border text-foreground opacity-60"
+              : "bg-card border-border text-foreground hover:bg-card/50 hover:scale-105"
           }`}
       >
         {isProcessing && (
-          <span className="absolute inset-0 rounded-full border-2 border-primary animate-ping" />
+          <span className="absolute inset-0 rounded-md border-2 border-foreground animate-ping" />
         )}
         {isProcessing ? (
           <Loader2 className="h-6 w-6 animate-spin" />
@@ -253,17 +259,17 @@ export function VoiceTaskButton() {
 
       {/* Live-транскрипт во время записи */}
       {isRecording && (
-        <div className="fixed top-20 right-8 z-40 min-w-[400px] max-w-lg rounded-xl border border-red-500 bg-background/95 backdrop-blur-md px-4 py-3 shadow-neon animate-in slide-in-from-top-4">
+        <div className="fixed top-20 right-8 z-40 min-w-[400px] max-w-lg rounded-md border border-border bg-card/95 backdrop-blur-md px-4 py-3 shadow-md animate-in slide-in-from-top-4">
           <div className="flex items-center gap-2 mb-2">
             <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-sm font-medium text-red-200">
+            <span className="text-sm font-medium text-foreground">
               Слушаю...
             </span>
             <span className="text-xs text-muted-foreground ml-auto">
               нажмите ещё раз — отправить
             </span>
           </div>
-          <div className="text-sm text-foreground/90 min-h-[1.5em]">
+          <div className="text-sm text-foreground min-h-[1.5em]">
             {status.transcript ||
               status.interim ||
               (
@@ -282,12 +288,12 @@ export function VoiceTaskButton() {
 
       {/* Индикатор обработки */}
       {isProcessing && (
-        <div className="fixed top-20 right-8 z-40 min-w-[360px] max-w-md rounded-xl border border-neon bg-background/95 backdrop-blur-md px-4 py-3 shadow-neon animate-in slide-in-from-top-4">
-          <div className="flex items-center gap-2 mb-2 text-primary">
+        <div className="fixed top-20 right-8 z-40 min-w-[360px] max-w-md rounded-md border border-border bg-card/95 backdrop-blur-md px-4 py-3 shadow-md animate-in slide-in-from-top-4">
+          <div className="flex items-center gap-2 mb-2 text-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span className="text-sm font-medium">Создаю задачи...</span>
           </div>
-          <div className="text-xs text-muted-foreground italic bg-background/40 rounded px-2 py-1.5 border border-neon/20">
+          <div className="text-xs text-muted-foreground italic bg-card/50 rounded px-2 py-1.5 border border-border">
             🎤 {status.transcript}
           </div>
         </div>
@@ -297,17 +303,17 @@ export function VoiceTaskButton() {
       {status.kind === "success" && (
         <Toast kind="success">
           <div className="flex items-start gap-3">
-            <CheckCircle2 className="h-5 w-5 text-emerald-300 mt-0.5 shrink-0" />
+            <CheckCircle2 className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
             <div className="flex-1 space-y-2">
-              <div className="font-medium">
+              <div className="font-medium text-foreground">
                 {status.tasks.length > 0
                   ? getSuccessMessage(status.tasks)
                   : "Распознано, но задач не найдено"}
               </div>
 
               {status.transcript && (
-                <div className="text-xs text-muted-foreground italic bg-background/40 rounded px-2 py-1.5 border border-neon/20">
-                  <span className="not-italic font-medium text-foreground/70">
+                <div className="text-xs text-muted-foreground italic bg-card/50 rounded px-2 py-1.5 border border-border">
+                  <span className="not-italic font-medium text-foreground">
                     🎤 Текст:{" "}
                   </span>
                   {status.transcript}
@@ -315,7 +321,7 @@ export function VoiceTaskButton() {
               )}
 
               {status.tasks.length > 0 && (
-                <div className="text-sm text-foreground/90 space-y-1">
+                <div className="text-sm text-foreground space-y-1">
                   {status.tasks.map((task, idx) => (
                     <div key={task.id} className="flex items-start gap-2">
                       <span className="text-muted-foreground">
@@ -323,7 +329,7 @@ export function VoiceTaskButton() {
                       </span>
                       <span>{task.description}</span>
                       {task.assignee && (
-                        <span className="text-xs text-primary">
+                        <span className="text-xs text-muted-foreground">
                           → {task.assignee}
                         </span>
                       )}
@@ -347,9 +353,26 @@ export function VoiceTaskButton() {
       {/* Ошибка */}
       {status.kind === "error" && (
         <Toast kind="error">
-          <div className="flex items-start gap-2">
-            <XCircle className="h-5 w-5 text-red-300 mt-0.5 shrink-0" />
-            <div className="flex-1 text-sm">{status.message}</div>
+          <div className="flex items-start gap-3">
+            <XCircle className="h-5 w-5 text-red-500 mt-0.5 shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="text-sm text-foreground font-medium">
+                {status.message}
+              </div>
+              {status.transcript && (
+                <div className="text-xs text-muted-foreground italic bg-card/50 rounded px-2 py-1.5 border border-red-500/30">
+                  <span className="not-italic font-medium text-foreground">
+                    🎤 Вы сказали:{" "}
+                  </span>
+                  {status.transcript}
+                </div>
+              )}
+              {status.reason === "missing_details" && (
+                <div className="text-xs text-muted-foreground">
+                  Попробуйте уточнить: кто, что и когда должен сделать.
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setStatus({ kind: "idle" })}
@@ -372,9 +395,13 @@ function Toast({
   children: React.ReactNode;
 }) {
   const border = kind === "success" ? "border-emerald-500" : "border-red-500";
+  const bg =
+    kind === "success"
+      ? "bg-card/95"
+      : "bg-red-500/10 dark:bg-red-500/15";
   return (
     <div
-      className={`fixed top-20 right-8 z-40 min-w-[360px] max-w-md rounded-xl border ${border} bg-background/95 backdrop-blur-md px-4 py-3 shadow-neon animate-in slide-in-from-top-4`}
+      className={`fixed top-20 right-8 z-40 min-w-[360px] max-w-md rounded-md border ${border} ${bg} backdrop-blur-md px-4 py-3 shadow-md animate-in slide-in-from-top-4`}
     >
       {children}
     </div>

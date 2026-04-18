@@ -22,6 +22,20 @@ def set_bot_instance(bot_instance: Bot) -> None:
     bot = bot_instance
 
 
+def _resolve_tg_id(tg_id: int | None) -> int | None:
+    """Если Telegram ID фейковый (<100000 — seed data), заменяем на реальный fallback.
+    Так dev-демо работает на всех учителях без миграции БД."""
+    if not tg_id:
+        return None
+    if tg_id < 100000 and settings.DEV_FALLBACK_TG_ID:
+        logger.info(
+            "Fake tg_id=%s → fallback %s (DEV_FALLBACK_TG_ID)",
+            tg_id, settings.DEV_FALLBACK_TG_ID,
+        )
+        return settings.DEV_FALLBACK_TG_ID
+    return tg_id
+
+
 async def send_task_notification(task: dict[str, Any]) -> None:
     """Отправить уведомление о новой задаче с inline-кнопками."""
     global bot
@@ -68,15 +82,19 @@ async def send_task_notification(task: dict[str, Any]) -> None:
     lines.append("<i>Нажмите кнопку для изменения статуса:</i>")
 
     try:
+        resolved_id = _resolve_tg_id(staff["telegram_id"])
+        if not resolved_id:
+            logger.warning("No telegram_id for %s, skipping task notif", staff["fio"])
+            return
         await bot.send_message(
-            chat_id=staff["telegram_id"],
+            chat_id=resolved_id,
             text="\n".join(lines),
             reply_markup=keyboard,
             parse_mode="HTML"
         )
         logger.info(
             "Sent task notification to %s (tg_id=%s) for task %s",
-            staff["fio"], staff["telegram_id"], task_id
+            staff["fio"], resolved_id, task_id
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
@@ -96,19 +114,12 @@ async def send_substitution_notification(
 ) -> bool:
     """Отправить учителю push-уведомление о назначении замены.
     Callback-кнопки используют substitution_id для идентификации записи.
-    Возвращает True при успехе."""
+    Дублируется в WhatsApp, если у учителя заполнен whatsapp_phone.
+    Возвращает True, если хотя бы один канал сработал."""
     global bot
-    if not bot:
-        logger.error("Bot instance not set for notifications")
-        return False
 
     tg_id = candidate.get("telegram_id")
-    if not tg_id:
-        logger.warning(
-            "Cannot notify candidate %s: no telegram_id", candidate.get("fio")
-        )
-        return False
-
+    wa_phone = candidate.get("whatsapp_phone")
     absent_name = absent_teacher.get("fio", "коллега")
 
     # Текст по ТЗ: "Вам назначена замена в {класс} на {номер_урока} вместо {ФИО}. Подтвердите готовность."
@@ -143,20 +154,48 @@ async def send_substitution_notification(
         ],
     ])
 
-    try:
-        await bot.send_message(
-            chat_id=tg_id,
-            text="\n".join(lines),
-            reply_markup=keyboard,
-            parse_mode="HTML",
+    tg_ok = False
+    wa_ok = False
+
+    # --- Telegram ---
+    resolved_tg = _resolve_tg_id(tg_id)
+    if bot and resolved_tg:
+        try:
+            await bot.send_message(
+                chat_id=resolved_tg,
+                text="\n".join(lines),
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+            logger.info(
+                "Sent TG substitution notif (id=%s) to %s (tg=%s)",
+                substitution_id, candidate.get("fio"), resolved_tg,
+            )
+            tg_ok = True
+        except Exception:
+            logger.exception(
+                "TG notif failed for %s", candidate.get("fio")
+            )
+    elif not tg_id:
+        logger.info("No telegram_id for %s, skipping TG", candidate.get("fio"))
+
+    # --- WhatsApp через Twilio ---
+    if wa_phone:
+        import whatsapp as wa
+        wa_ok = await wa.send_substitution_request(
+            to_phone=wa_phone,
+            substitution_id=substitution_id,
+            class_name=class_name,
+            lesson_number=lesson_number,
+            absent_name=absent_name,
+            subject=subject,
+            room=room,
+            reason=reason,
         )
-        logger.info(
-            "Sent substitution notification (id=%s) to %s (tg=%s) instead of %s",
-            substitution_id, candidate.get("fio"), tg_id, absent_name,
-        )
-        return True
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "Failed to send substitution notification to %s", candidate.get("fio")
-        )
-        return False
+        if wa_ok:
+            logger.info(
+                "Sent WA substitution notif (id=%s) to %s (wa=%s)",
+                substitution_id, candidate.get("fio"), wa_phone,
+            )
+
+    return tg_ok or wa_ok

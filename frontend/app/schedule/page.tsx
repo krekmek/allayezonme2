@@ -8,6 +8,10 @@ import {
   Loader2,
   Phone,
   CheckCircle2,
+  BookOpen,
+  Clock,
+  MapPin,
+  Users,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findSubstitution, type Staff } from "@/lib/substitution";
@@ -30,11 +34,37 @@ function todayDow(): number {
   return js === 0 ? 7 : js;
 }
 
+function getCurrentLessonNumber(): number {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const time = hours * 60 + minutes;
+  
+  // Типичное расписание уроков (можно настроить)
+  const lessonTimes = [
+    { start: 8 * 60 + 0, end: 8 * 60 + 45, lesson: 1 },
+    { start: 8 * 60 + 55, end: 9 * 60 + 40, lesson: 2 },
+    { start: 9 * 60 + 50, end: 10 * 60 + 35, lesson: 3 },
+    { start: 10 * 60 + 45, end: 11 * 60 + 30, lesson: 4 },
+    { start: 11 * 60 + 40, end: 12 * 60 + 25, lesson: 5 },
+    { start: 12 * 60 + 35, end: 13 * 60 + 20, lesson: 6 },
+    { start: 13 * 60 + 30, end: 14 * 60 + 15, lesson: 7 },
+  ];
+  
+  for (const lt of lessonTimes) {
+    if (time >= lt.start && time <= lt.end) {
+      return lt.lesson;
+    }
+  }
+  return 0;
+}
+
 export default function SchedulePage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [staff, setStaff] = useState<Record<number, Staff>>({});
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<number | "all">(todayDow());
+  const [currentLesson, setCurrentLesson] = useState<number>(getCurrentLessonNumber());
 
   // Открытая карточка учителя (показ кнопки «Заболел»)
   const [openCell, setOpenCell] = useState<string | null>(null);
@@ -49,6 +79,31 @@ export default function SchedulePage() {
     candidates: Staff[];
     error: string | null;
   }>(null);
+
+  async function assignSubstitution(candidateId: number) {
+    if (!subModal) return;
+    try {
+      const res = await fetch("http://localhost:8001/api/request-substitution", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          absent_teacher_id: subModal.absent.id,
+          candidate_id: candidateId,
+          lesson_number: subModal.lessonNumber,
+          class_name: subModal.className,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSubModal(null);
+        // Можно добавить уведомление об успехе
+      } else {
+        console.error("Error assigning substitution:", data);
+      }
+    } catch (e) {
+      console.error("Error assigning substitution:", e);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -72,6 +127,14 @@ export default function SchedulePage() {
       setLoading(false);
     }
     load();
+  }, []);
+
+  // Обновляем текущий урок каждую минуту
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentLesson(getCurrentLessonNumber());
+    }, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // Фильтрация по дню
@@ -142,8 +205,8 @@ export default function SchedulePage() {
   return (
     <div className="space-y-6" onClick={() => setOpenCell(null)}>
       <header className="space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight text-glow flex items-center gap-3">
-          <CalendarDays className="h-8 w-8 text-neon" />
+        <h1 className="text-4xl font-bold tracking-tight text-foreground flex items-center gap-3">
+          <CalendarDays className="h-8 w-8 text-muted-foreground" />
           Расписание
         </h1>
         <p className="text-muted-foreground">
@@ -177,118 +240,155 @@ export default function SchedulePage() {
           Загрузка расписания...
         </div>
       ) : classes.length === 0 ? (
-        <div className="bg-surface border border-neon rounded-xl p-10 text-center text-muted-foreground">
+        <div className="bg-card border border-border rounded-md p-10 text-center text-muted-foreground">
           Нет уроков для выбранного дня.
         </div>
       ) : (
         <div
-          className="bg-surface border border-neon rounded-xl overflow-x-auto"
+          className="bg-card border border-border rounded-md overflow-x-auto"
           onClick={(e) => e.stopPropagation()}
         >
           <table className="w-full min-w-[700px] text-sm">
             <thead>
-              <tr className="border-b border-neon bg-primary/5">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16">
-                  Урок
+              <tr className="border-b border-border bg-card">
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground w-20">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="h-4 w-4" />
+                    Урок
+                  </div>
                 </th>
                 {classes.map((cls) => (
                   <th
                     key={cls}
                     className="px-4 py-3 text-left font-semibold text-foreground"
                   >
-                    {cls}
+                    <div className="flex items-center gap-1.5">
+                      <Users className="h-4 w-4 text-muted-foreground" />
+                      {cls}
+                    </div>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {lessonNumbers.map((lesson) => (
-                <tr key={lesson} className="border-b border-neon/30">
-                  <td className="px-4 py-3 text-muted-foreground font-medium">
-                    {lesson}
-                  </td>
-                  {classes.map((cls) => {
-                    const s = grid[cls]?.[lesson];
-                    if (!s) {
+              {lessonNumbers.map((lesson) => {
+                const isCurrentLesson = selectedDay === todayDow() && lesson === currentLesson;
+                return (
+                  <tr
+                    key={lesson}
+                    className={`border-b border-border transition ${
+                      isCurrentLesson ? "bg-card/50" : "hover:bg-card/30"
+                    }`}
+                  >
+                    <td className={`px-4 py-3 font-medium transition ${
+                      isCurrentLesson ? "text-foreground font-bold" : "text-muted-foreground"
+                    }`}>
+                      <div className="flex items-center gap-1.5">
+                        {isCurrentLesson && <span className="w-2 h-2 rounded-full bg-foreground animate-pulse" />}
+                        {lesson}
+                      </div>
+                    </td>
+                    {classes.map((cls) => {
+                      const s = grid[cls]?.[lesson];
+                      if (!s) {
+                        return (
+                          <td
+                            key={cls}
+                            className="px-4 py-3 text-muted-foreground/50"
+                          >
+                            —
+                          </td>
+                        );
+                      }
+                      const teacher = s.teacher_id
+                        ? staff[s.teacher_id]
+                        : undefined;
+                      const cellKey = `${cls}-${lesson}-${s.id}`;
+                      const isOpen = openCell === cellKey;
                       return (
                         <td
                           key={cls}
-                          className="px-4 py-3 text-muted-foreground/40"
+                          className={`px-4 py-3 align-top relative transition ${
+                            isCurrentLesson ? "bg-card/50" : ""
+                          }`}
                         >
-                          —
-                        </td>
-                      );
-                    }
-                    const teacher = s.teacher_id
-                      ? staff[s.teacher_id]
-                      : undefined;
-                    const cellKey = `${cls}-${lesson}-${s.id}`;
-                    const isOpen = openCell === cellKey;
-                    return (
-                      <td key={cls} className="px-4 py-3 align-top relative">
-                        <div className="font-medium">{s.subject}</div>
-                        {s.room && (
-                          <div className="text-xs text-muted-foreground">
-                            каб. {s.room}
-                          </div>
-                        )}
-                        {teacher ? (
-                          <div className="relative inline-block">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOpenCell(isOpen ? null : cellKey);
-                              }}
-                              className={`mt-1 text-xs rounded-md px-2 py-1 transition border ${
-                                isOpen
-                                  ? "bg-primary/20 border-neon text-primary shadow-neon-sm"
-                                  : "bg-primary/5 border-neon/30 hover:border-neon hover:bg-primary/10"
-                              }`}
-                            >
-                              {teacher.fio}
-                            </button>
-                            {isOpen && (
-                              <div
-                                className="absolute z-20 mt-1 left-0 rounded-lg border border-neon bg-background shadow-neon p-2 min-w-[180px]"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <div className="text-xs text-muted-foreground mb-2 px-1">
-                                  {teacher.fio}
-                                  {teacher.specialization && (
-                                    <span className="block text-[10px] opacity-70">
-                                      {teacher.specialization}
-                                    </span>
+                          <div className={`rounded-md p-3 border transition ${
+                            isCurrentLesson
+                              ? "bg-card border-border shadow-sm"
+                              : "bg-card/50 border-border hover:border-border"
+                          }`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm text-foreground">
+                                  {s.subject}
+                                </div>
+                                {s.room && (
+                                  <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                                    <MapPin className="h-3 w-3" />
+                                    каб. {s.room}
+                                  </div>
+                                )}
+                              </div>
+                              {teacher ? (
+                                <div className="relative inline-block">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenCell(isOpen ? null : cellKey);
+                                    }}
+                                    className={`text-xs rounded-md px-2 py-1 transition border truncate max-w-[120px] ${
+                                      isOpen
+                                        ? "bg-card border-border text-foreground"
+                                        : "bg-card/50 border-border hover:border-border text-muted-foreground hover:text-foreground"
+                                    }`}
+                                  >
+                                    {teacher.fio}
+                                  </button>
+                                  {isOpen && (
+                                    <div
+                                      className="absolute z-20 mt-1 right-0 rounded-md border border-border bg-card shadow-lg p-2 min-w-[200px]"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <div className="text-xs text-muted-foreground mb-2 px-1">
+                                        <div className="font-medium text-foreground">{teacher.fio}</div>
+                                        {teacher.specialization && (
+                                          <span className="block text-[10px] opacity-70 mt-0.5">
+                                            {teacher.specialization}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleSick(
+                                            teacher,
+                                            s.lesson_number,
+                                            s.class_name,
+                                            s.day_of_week
+                                          )
+                                        }
+                                        className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-card border-border text-muted-foreground hover:text-foreground px-3 py-1.5 text-xs font-medium transition hover:bg-card/50"
+                                      >
+                                        <UserX className="h-3.5 w-3.5" />
+                                        Заболел
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleSick(
-                                      teacher,
-                                      s.lesson_number,
-                                      s.class_name,
-                                      s.day_of_week
-                                    )
-                                  }
-                                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-red-500/15 border border-red-500/50 text-red-300 px-3 py-1.5 text-xs font-medium transition hover:bg-red-500/25 hover:shadow-[0_0_10px_rgba(239,68,68,0.4)]"
-                                >
-                                  <UserX className="h-3.5 w-3.5" />
-                                  Заболел
-                                </button>
-                              </div>
-                            )}
+                              ) : (
+                                <div className="text-xs text-muted-foreground italic">
+                                  учитель не назначен
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        ) : (
-                          <div className="mt-1 text-xs text-muted-foreground/60">
-                            учитель не назначен
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -298,6 +398,7 @@ export default function SchedulePage() {
         <SubstitutionModal
           data={subModal}
           onClose={() => setSubModal(null)}
+          onAssign={assignSubstitution}
         />
       )}
     </div>
@@ -319,8 +420,8 @@ function DayChip({
       onClick={onClick}
       className={`rounded-lg px-3 py-1.5 text-sm transition border ${
         active
-          ? "bg-primary/15 border-neon text-primary shadow-neon-sm"
-          : "bg-transparent border-neon/30 text-muted-foreground hover:text-foreground hover:border-neon"
+          ? "bg-card border-border text-white"
+          : "bg-transparent border-border text-muted-foreground hover:text-white hover:border-border"
       }`}
     >
       {label}
@@ -331,6 +432,7 @@ function DayChip({
 function SubstitutionModal({
   data,
   onClose,
+  onAssign,
 }: {
   data: {
     absent: Staff;
@@ -342,30 +444,34 @@ function SubstitutionModal({
     error: string | null;
   };
   onClose: () => void;
+  onAssign: (candidateId: number) => void;
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
-        className="border-gradient modal-content rounded-xl w-full max-w-lg shadow-neon"
+        className="bg-card border border-border rounded-md w-full max-w-lg shadow-lg dark:bg-card dark:border-border dark:shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-neon">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-card dark:bg-card dark:border-border">
           <div>
-            <h3 className="text-lg font-semibold text-glow">Поиск замены</h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              Заболел: <span className="text-foreground">{data.absent.fio}</span>
+            <h3 className="text-lg font-semibold text-foreground dark:text-foreground flex items-center gap-2">
+              <BookOpen className="h-5 w-5 text-muted-foreground dark:text-muted-foreground" />
+              Поиск замены
+            </h3>
+            <p className="text-xs text-muted-foreground dark:text-muted-foreground mt-2">
+              <span className="text-foreground dark:text-foreground font-medium">{data.absent.fio}</span>
               {" · "}
-              Класс {data.className}, урок {data.lessonNumber}
+              <span className="text-foreground dark:text-foreground">{data.className}</span>, урок {data.lessonNumber}
               {data.dayOfWeek && ` · ${DAY_NAMES[data.dayOfWeek - 1]}`}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-foreground"
+            className="p-1 rounded-md hover:bg-card dark:hover:bg-card text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-foreground"
             aria-label="Закрыть"
           >
             <X className="h-5 w-5" />
@@ -374,54 +480,69 @@ function SubstitutionModal({
 
         <div className="p-5">
           {data.loading ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              Ищем свободных педагогов...
+            <div className="flex flex-col items-center justify-center gap-3 py-12 text-gray-600 dark:text-gray-400">
+              <Loader2 className="h-8 w-8 animate-spin text-gray-600 dark:text-gray-400" />
+              <span className="text-sm">Ищем свободных педагогов...</span>
             </div>
           ) : data.error ? (
-            <div className="py-6 text-center text-red-400">{data.error}</div>
+            <div className="py-8 text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-50 dark:bg-red-950/30 mb-3">
+                <X className="h-6 w-6 text-red-600 dark:text-red-400" />
+              </div>
+              <div className="text-red-600 dark:text-red-400 font-medium">{data.error}</div>
+            </div>
           ) : data.candidates.length === 0 ? (
-            <div className="py-10 text-center text-muted-foreground">
-              Свободных педагогов с подходящей специализацией не найдено.
+            <div className="py-10 text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-card border border-border mb-3">
+                <Users className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <div className="text-muted-foreground text-sm">
+                Свободных педагогов с подходящей специализацией не найдено
+              </div>
             </div>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-3">
               {data.candidates.map((c) => (
                 <li
                   key={c.id}
-                  className="flex flex-col gap-2 rounded-lg border border-neon/40 bg-background/40 px-4 py-3 hover:border-neon transition"
+                  className="flex flex-col gap-2 rounded-md border border-border bg-card/50 px-4 py-3 hover:border-border hover:shadow-md transition cursor-pointer"
+                  onClick={() => onAssign(c.id)}
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-medium flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    <div className="flex-1">
+                      <div className="font-medium flex items-center gap-2 text-foreground">
+                        <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
                         {c.fio}
                       </div>
                       {c.specialization && (
-                        <div className="text-xs text-muted-foreground mt-0.5">
+                        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                          <BookOpen className="h-3 w-3" />
                           {c.specialization}
                         </div>
                       )}
                     </div>
-                    {c.telegram_id ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-primary">
-                        <Phone className="h-3.5 w-3.5" />
-                        tg: {c.telegram_id}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        без TG
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {c.telegram_id ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-foreground bg-card border border-border px-2 py-1 rounded-md">
+                          <Phone className="h-3 w-3" />
+                          {c.telegram_id}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground bg-card/50 border border-border px-2 py-1 rounded-md">
+                          без TG
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {c.warnings && c.warnings.length > 0 && (
-                    <div className="flex flex-col gap-1 mt-1">
+                    <div className="mt-2 pt-2 border-t border-border">
                       {c.warnings.map((warning, idx) => (
                         <div
                           key={idx}
-                          className="text-xs text-red-400 font-medium"
+                          className="text-xs text-muted-foreground flex items-start gap-1"
                         >
-                          ⚠️ {warning}
+                          <span>⚠️</span>
+                          <span>{warning}</span>
                         </div>
                       ))}
                     </div>
@@ -432,11 +553,14 @@ function SubstitutionModal({
           )}
         </div>
 
-        <div className="px-5 py-3 border-t border-neon flex justify-end">
+        <div className="px-5 py-3 border-t border-border flex justify-between items-center bg-card">
+          <span className="text-xs text-muted-foreground">
+            Нажмите на кандидата для назначения
+          </span>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-neon/40 px-4 py-1.5 text-sm hover:bg-primary/10 hover:border-neon"
+            className="rounded-md border border-border px-4 py-1.5 text-sm hover:bg-card transition text-foreground"
           >
             Закрыть
           </button>

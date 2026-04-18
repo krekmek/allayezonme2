@@ -19,12 +19,16 @@ from db import (
     create_substitution,
     create_task_from_dashboard,
     get_staff_by_id,
+    get_substitution_by_id,
     list_pending_absences,
     list_staff,
     update_absence_status,
+    update_substitution_status,
 )
 from logic import find_substitution
 import notifications
+import rag_service
+import whatsapp as wa
 
 # Инициализируем бота для отправки уведомлений
 bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
@@ -55,38 +59,135 @@ _llm_client = AsyncOpenAI(
 _LLM_MODEL = "llama-3.3-70b-versatile"
 
 
-async def parse_tasks_from_text(text: str, staff_list: list[dict]) -> list[dict]:
-    """Разделить диктовку на задачи через LLM."""
-    # Формируем список имен сотрудников
-    staff_names = ", ".join([s["fio"] for s in staff_list])
+# Ключевые глаголы действия, которые указывают на валидную задачу
+_ACTION_VERBS = [
+    "напиши", "напишите", "подготовь", "подготовьте", "проверь", "проверьте",
+    "собери", "соберите", "организуй", "организуйте", "отправь", "отправьте",
+    "составь", "составьте", "сделай", "сделайте", "купи", "купите",
+    "позвони", "позвоните", "назначь", "назначьте", "передай", "передайте",
+    "закажи", "закажите", "принеси", "принесите", "создай", "создайте",
+    "обнови", "обновите", "исправь", "исправьте", "разработай", "разработайте",
+    "представь", "представьте", "распечатай", "распечатайте", "напомни", "напомните",
+    "убери", "уберите", "почини", "почините", "проведи", "проведите",
+    "разошли", "разошлите", "оформи", "оформите", "внеси", "внесите",
+    "найди", "найдите", "замени", "замените", "установи", "установите",
+    "запиши", "запишите", "посчитай", "посчитайте", "скажи", "скажите",
+    "запусти", "запустите", "удали", "удалите", "добавь", "добавьте",
+    "проконтролируй", "сообщи", "сообщите", "уведоми", "уведомите",
+    "договорись", "договоритесь", "поручи", "поручите", "нужно", "надо",
+    "следует", "должен", "должна", "должны",
+]
+
+# Стоп-фразы — явно невалидные
+_STOP_PHRASES = [
+    "добрый день", "добрый вечер", "доброе утро", "здравствуй", "здравствуйте",
+    "привет", "приветствую", "как дела", "как ты", "как вы", "спасибо",
+    "пожалуйста", "окей", "ок", "да", "нет", "ага", "угу", "хорошо",
+    "понял", "поняла", "поняли", "что делать", "что думаешь", "как тебе",
+]
+
+
+def _heuristic_is_valid(description: str) -> bool | None:
+    """Быстрая эвристическая проверка. Возвращает True/False или None (если неясно)."""
+    text = description.lower().strip()
     
+    # Слишком короткий текст
+    if len(text) < 5:
+        return False
+    
+    # Точное совпадение со стоп-фразой
+    if text in _STOP_PHRASES:
+        return False
+    
+    # Текст целиком — только стоп-фраза + пунктуация
+    clean = text.rstrip(".!?,;: ")
+    if clean in _STOP_PHRASES:
+        return False
+    
+    # Есть глагол действия — скорее всего валидно
+    words = text.split()
+    for word in words:
+        word_clean = word.rstrip(".,!?;:")
+        if word_clean in _ACTION_VERBS:
+            return True
+    
+    # Неясно — пусть решает LLM
+    return None
+
+
+async def parse_tasks_from_text(text: str, staff_list: list[dict]) -> dict[str, Any]:
+    """Intent Guard: классифицирует фразу и возвращает валидные задачи или reason отказа.
+    
+    Returns:
+        {"valid": True, "tasks": [...]}
+        {"valid": False, "reason": "not_a_task" | "missing_details", "message": "..."}
+    """
+    # Быстрая эвристическая проверка
+    heuristic = _heuristic_is_valid(text)
+    if heuristic is False:
+        print(f"[parse_tasks] Heuristic rejected: '{text[:80]}'")
+        return {
+            "valid": False,
+            "reason": "not_a_task",
+            "message": "Фраза не содержит поручения",
+        }
+    
+    staff_names = ", ".join([s["fio"] for s in staff_list])
     from datetime import date as _date
     today_str = _date.today().isoformat()
-    system_prompt = f"""Ты — ассистент директора школы. Раздели диктовку на отдельные задачи.
+    
+    system_prompt = f"""Ты — СТРОГИЙ Intent Guard для системы управления школой. Твоя задача — фильтровать голосовые команды директора.
 
-Список сотрудников школы (подбирай исполнителя по имени или фамилии, можно частичное совпадение):
-{staff_names}
+ДОМЕН: только школьное управление — замены, столовая, хоз. поручения, приказы, отчёты, родительские собрания, проверки, организация мероприятий.
 
-Сегодня: {today_str}. Преобразуй "завтра", "сегодня", "через неделю", "к пятнице" в YYYY-MM-DD.
+Список сотрудников: {staff_names}
+Сегодня: {today_str}
 
-Правила:
-- Любое распоряжение/поручение/задание — это задача, создавай её даже если исполнитель не указан
-- Если упомянуто имя (даже частично — "Аскар", "Иван", "Петрова") — ищи ближайшее совпадение в списке
-- Если исполнитель не найден — всё равно создай задачу с assignee: null
-- Не выдумывай задачи, которых нет в тексте
+АЛГОРИТМ:
+1. Если фраза — случайный разговор, шум, приветствие, междометие или бессмыслица → valid=false, reason="not_a_task"
+2. Если фраза похожа на поручение, но БЕЗ конкретики (нет что делать или с чем) → valid=false, reason="missing_details"
+3. Только если фраза — ЯВНОЕ школьное поручение с конкретикой → valid=true + список задач
 
-Верни JSON-объект СТРОГО в формате:
-{{
-  "tasks": [
-    {{
-      "description": "суть задачи на русском",
-      "assignee": "точное ФИО из списка выше или null",
-      "due_date": "YYYY-MM-DD или null"
-    }}
-  ]
-}}
+ПРИМЕРЫ ОТКАЗОВ:
 
-Если задач нет — {{"tasks": []}}. Отвечай только JSON."""
+Вход: "Привет, как дела"
+Выход: {{"valid": false, "reason": "not_a_task", "message": "Это приветствие, не поручение"}}
+
+Вход: "Эй, сделай там что-нибудь"
+Выход: {{"valid": false, "reason": "missing_details", "message": "Неясно что именно нужно сделать"}}
+
+Вход: "Надо бы проверить"
+Выход: {{"valid": false, "reason": "missing_details", "message": "Непонятно что проверить"}}
+
+Вход: "спасибо, окей, понял"
+Выход: {{"valid": false, "reason": "not_a_task", "message": "Подтверждения не являются задачами"}}
+
+Вход: "какая сегодня погода"
+Выход: {{"valid": false, "reason": "not_a_task", "message": "Вопрос вне школьной тематики"}}
+
+ПРИМЕРЫ ВАЛИДНЫХ ЗАДАЧ:
+
+Вход: "Напишите отчёт по 5А классу к пятнице"
+Выход: {{"valid": true, "tasks": [{{"description": "Написать отчёт по 5А классу", "assignee": null, "due_date": "YYYY-MM-DD (пятница)"}}]}}
+
+Вход: "Иван Петрович подготовьте замену на завтра для Сидоровой"
+Выход: {{"valid": true, "tasks": [{{"description": "Подготовить замену для Сидоровой", "assignee": "Иван Петрович...", "due_date": "завтрашняя дата"}}]}}
+
+Вход: "Добрый день, нужно купить мел и проверить столовую"
+Выход: {{"valid": true, "tasks": [{{"description": "Купить мел", "assignee": null, "due_date": null}}, {{"description": "Проверить столовую", "assignee": null, "due_date": null}}]}}
+(приветствие отброшено, два поручения выделены)
+
+ПРАВИЛА ПАРСИНГА (если valid=true):
+- Ищи имена сотрудников по частичному совпадению в списке выше
+- Даты: "завтра", "сегодня", "к пятнице" → конкретная YYYY-MM-DD
+- Описание — КРАТКОЕ, начинается с глагола действия
+- Не включай приветствия и паразитные слова в description
+
+ВАЖНО: При малейших сомнениях — отказывай (valid=false). Лучше попросить уточнить, чем создать мусорную задачу.
+
+Формат ответа — строго JSON:
+Для валидных: {{"valid": true, "tasks": [{{"description": "...", "assignee": "ФИО или null", "due_date": "YYYY-MM-DD или null"}}]}}
+Для невалидных: {{"valid": false, "reason": "not_a_task" | "missing_details", "message": "короткое объяснение на русском"}}"""
 
     try:
         response = await _llm_client.chat.completions.create(
@@ -96,39 +197,85 @@ async def parse_tasks_from_text(text: str, staff_list: list[dict]) -> list[dict]
                 {"role": "user", "content": text},
             ],
             response_format={"type": "json_object"},
-            temperature=0.2,
+            temperature=0.0,
         )
         raw = response.choices[0].message.content or "{}"
-        print(f"[parse_tasks_from_text] LLM raw: {raw}")
+        print(f"[parse_tasks] Intent Guard raw: {raw}")
         data = json.loads(raw)
-        # LLM может вернуть {"tasks": [...]} или сразу [...]
-        if isinstance(data, dict):
-            tasks = data.get("tasks") or data.get("задачи") or []
-            return tasks if isinstance(tasks, list) else []
-        if isinstance(data, list):
-            return data
-        return []
     except Exception as exc:
-        print(f"LLM parsing failed: {exc}")
-        return []
+        print(f"[parse_tasks] LLM failed: {exc}")
+        return {
+            "valid": False,
+            "reason": "llm_error",
+            "message": f"Ошибка AI: {exc}",
+        }
+
+    # Если LLM явно отказала
+    if isinstance(data, dict) and data.get("valid") is False:
+        return {
+            "valid": False,
+            "reason": data.get("reason", "not_a_task"),
+            "message": data.get("message", "ИИ не распознал задачу"),
+        }
+
+    # Извлекаем задачи
+    if isinstance(data, dict):
+        tasks = data.get("tasks") or data.get("задачи") or []
+    elif isinstance(data, list):
+        tasks = data
+    else:
+        tasks = []
+
+    if not isinstance(tasks, list):
+        tasks = []
+
+    # Фильтруем пустые описания
+    valid_tasks = [
+        t for t in tasks
+        if isinstance(t, dict)
+        and t.get("description")
+        and len(str(t.get("description", "")).strip()) >= 3
+    ]
+
+    if not valid_tasks:
+        return {
+            "valid": False,
+            "reason": "not_a_task",
+            "message": "ИИ не нашёл конкретных поручений в фразе",
+        }
+
+    print(f"[parse_tasks] Valid: {len(valid_tasks)} tasks")
+    return {"valid": True, "tasks": valid_tasks}
 
 
 class ProcessTextRequest(BaseModel):
     text: str
 
 
-@app.post("/api/process-text")
-async def process_text(request: ProcessTextRequest) -> dict[str, Any]:
-    """Принять уже распознанный текст (например, от Web Speech API), извлечь задачи и создать в БД."""
-    text = (request.text or "").strip()
-    if not text:
-        return {"transcript": "", "tasks": [], "count": 0, "error": "Пустой текст"}
+async def _create_tasks_or_reject(text: str) -> tuple[dict[str, Any], int]:
+    """Общая логика: Intent Guard → создание задач или возврат ошибки валидации."""
+    from fastapi.responses import JSONResponse  # noqa: F401
 
     staff_list = await list_staff()
-    tasks_data = await parse_tasks_from_text(text, staff_list)
+    result = await parse_tasks_from_text(text, staff_list)
 
+    # Intent Guard отклонил — не создаём задачи
+    if not result.get("valid"):
+        return (
+            {
+                "valid": False,
+                "transcript": text,
+                "tasks": [],
+                "count": 0,
+                "reason": result.get("reason", "not_a_task"),
+                "error": result.get("message", "ИИ не распознал задачу. Пожалуйста, уточните распоряжение"),
+            },
+            400,
+        )
+
+    # Валидно — создаём задачи в БД
     created_tasks = []
-    for task_data in tasks_data:
+    for task_data in result.get("tasks", []):
         try:
             task = await create_task_from_dashboard(
                 description=task_data.get("description", ""),
@@ -141,52 +288,95 @@ async def process_text(request: ProcessTextRequest) -> dict[str, Any]:
         except Exception as exc:
             print(f"Failed to create task: {exc}")
 
-    return {
-        "transcript": text,
-        "tasks": created_tasks,
-        "count": len(created_tasks),
-    }
+    return (
+        {
+            "valid": True,
+            "transcript": text,
+            "tasks": created_tasks,
+            "count": len(created_tasks),
+        },
+        200,
+    )
+
+
+@app.post("/api/process-text")
+async def process_text(request: ProcessTextRequest):
+    """Принять распознанный текст, применить Intent Guard и создать задачи при валидности."""
+    from fastapi.responses import JSONResponse
+
+    text = (request.text or "").strip()
+    if not text:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "valid": False,
+                "transcript": "",
+                "tasks": [],
+                "count": 0,
+                "reason": "empty_input",
+                "error": "Пустой текст",
+            },
+        )
+
+    payload, code = await _create_tasks_or_reject(text)
+    return JSONResponse(status_code=code, content=payload)
 
 
 @app.post("/api/process-voice")
-async def process_voice(audio: UploadFile = File(...)) -> dict[str, Any]:
-    """Принять аудиофайл, транскрибировать через Whisper, разделить на задачи и создать в БД."""
-    # Читаем аудиофайл
+async def process_voice(audio: UploadFile = File(...)):
+    """Принять аудио, транскрибировать через Whisper, применить Intent Guard и создать задачи."""
+    from fastapi.responses import JSONResponse
+
     audio_bytes = await audio.read()
-    
-    # Транскрибируем через Whisper
     text = await transcribe_ogg(audio_bytes)
     if not text:
-        return {"error": "Не удалось транскрибировать аудио", "tasks": []}
-    
-    # Получаем список сотрудников
-    staff_list = await list_staff()
-    
-    # Парсим задачи через LLM
-    tasks_data = await parse_tasks_from_text(text, staff_list)
-    
-    # Создаем задачи в БД
-    created_tasks = []
-    for task_data in tasks_data:
-        try:
-            task = await create_task_from_dashboard(
-                description=task_data.get("description", ""),
-                assignee=task_data.get("assignee"),
-                due_date=task_data.get("due_date"),
-            )
-            created_tasks.append(task)
-            
-            # Отправляем уведомление, если указан исполнитель
-            if task_data.get("assignee"):
-                await notifications.send_task_notification(task)
-        except Exception as exc:
-            print(f"Failed to create task: {exc}")
-    
-    return {
-        "transcript": text,
-        "tasks": created_tasks,
-        "count": len(created_tasks),
-    }
+        return JSONResponse(
+            status_code=400,
+            content={
+                "valid": False,
+                "transcript": "",
+                "tasks": [],
+                "count": 0,
+                "reason": "transcription_failed",
+                "error": "Не удалось транскрибировать аудио",
+            },
+        )
+
+    payload, code = await _create_tasks_or_reject(text)
+    return JSONResponse(status_code=code, content=payload)
+
+
+class GenerateDocumentRequest(BaseModel):
+    request: str
+    director_name: str | None = None
+    match_count: int | None = None
+
+
+@app.post("/api/generate-document")
+async def generate_document(payload: GenerateDocumentRequest):
+    """Сгенерировать официальное распоряжение директора на основе базы знаний (RAG)."""
+    from fastapi.responses import JSONResponse
+
+    text = (payload.request or "").strip()
+    if not text:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Пустой запрос. Опишите суть распоряжения."},
+        )
+
+    try:
+        result = await rag_service.generate_official_document(
+            text,
+            match_count=payload.match_count or 6,
+            director_name=(payload.director_name or "И.О. Директора"),
+        )
+        return result
+    except Exception as exc:
+        print(f"[generate_document] failed: {exc}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Не удалось сгенерировать документ: {exc}"},
+        )
 
 
 @app.get("/api/absences")
@@ -341,6 +531,79 @@ async def create_task(request: CreateTaskRequest) -> dict[str, Any]:
     
     return task
 
+
+# ==================== Twilio WhatsApp Webhook ====================
+
+from fastapi import Request
+from fastapi.responses import Response
+
+
+@app.post("/api/whatsapp/webhook")
+async def whatsapp_webhook(request: Request):
+    """Twilio WhatsApp входящие сообщения (form-encoded).
+
+    Настройка: в Twilio Console → Messaging → Settings → WhatsApp sandbox settings
+    'When a message comes in' → URL этого эндпоинта."""
+    form = dict(await request.form())
+    parsed = wa.parse_incoming(form)
+
+    from_phone = parsed["from_phone"]         # "whatsapp:+77012345678"
+    action = parsed.get("button_action")       # "confirm" | "decline" | None
+    sub_id = parsed.get("sub_id")
+
+    # Ответ пользователю — TwiML XML (Twilio его рассылает как reply)
+    def twiml(reply_text: str) -> Response:
+        xml = f"<?xml version='1.0' encoding='UTF-8'?><Response><Message>{reply_text}</Message></Response>"
+        return Response(content=xml, media_type="application/xml")
+
+    if not action or not sub_id:
+        return twiml(
+            "Привет! Чтобы принять замену, ответьте:\n"
+            "ДА <номер>  — принять\n"
+            "НЕТ <номер> — отклонить\n\n"
+            "Номер замены указан в полученном уведомлении."
+        )
+
+    sub = await get_substitution_by_id(sub_id)
+    if not sub:
+        return twiml(f"❓ Замена №{sub_id} не найдена.")
+    if sub.get("status") != "pending":
+        return twiml(f"⚠️ Замена №{sub_id} уже обработана: {sub.get('status')}.")
+
+    new_status = "confirmed" if action == "confirm" else "declined"
+    await update_substitution_status(sub_id, new_status)
+
+    reply_msg = (
+        "✅ Вы приняли замену. Спасибо!"
+        if action == "confirm"
+        else "❌ Вы отклонили замену. Директор получит уведомление."
+    )
+
+    # Уведомление отсутствующему через WhatsApp (если есть)
+    absent = sub.get("absent") or {}
+    substitute = sub.get("substitute") or {}
+    absent_wa = absent.get("whatsapp_phone")
+    if absent_wa:
+        substitute_name = substitute.get("fio", "Учитель")
+        class_name = sub.get("class_name") or "—"
+        lesson_number = sub.get("lesson_number") or "—"
+        if action == "confirm":
+            absent_msg = (
+                f"✅ {substitute_name} подтвердил(а) замену\n"
+                f"Класс: {class_name}, урок: {lesson_number}"
+            )
+        else:
+            absent_msg = (
+                f"❌ {substitute_name} отклонил(а) замену\n"
+                f"Класс: {class_name}, урок: {lesson_number}\n"
+                f"Нужно выбрать другого учителя."
+            )
+        await wa.send_text(absent_wa, absent_msg)
+
+    return twiml(reply_msg)
+
+
+# ==================== Main ====================
 
 if __name__ == "__main__":
     import uvicorn

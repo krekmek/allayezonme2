@@ -10,6 +10,8 @@ import {
   GraduationCap,
   Utensils,
   ListTodo,
+  Users,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,6 +28,8 @@ const NAV: NavItem[] = [
   { label: "Инциденты", href: "/incidents", icon: AlertTriangle },
   { label: "Столовая", href: "/canteen", icon: Utensils },
   { label: "Расписание", href: "/schedule", icon: CalendarDays },
+  { label: "Коллектив", href: "/staff", icon: Users },
+  { label: "Общий график", href: "/staff-schedule", icon: CalendarClock },
   { label: "База знаний", href: "/knowledge", icon: BookOpenText },
 ];
 
@@ -37,18 +41,18 @@ export function Sidebar() {
       className={cn(
         "sticky top-0 h-screen w-64 shrink-0",
         "flex flex-col gap-6 px-4 py-6",
-        "border-r border-neon bg-surface"
+        "border-r border-border bg-surface-glass backdrop-blur-xl"
       )}
     >
       <div className="flex items-center gap-3 px-2">
-        <div className="grid place-items-center h-10 w-10 rounded-xl bg-primary/15 text-primary shadow-neon animate-pulse-neon">
+        <div className="grid place-items-center h-10 w-10 rounded-md bg-card border border-border text-foreground">
           <GraduationCap className="h-5 w-5" />
         </div>
         <div>
           <div className="text-sm uppercase tracking-widest text-muted-foreground">
             School AI
           </div>
-          <div className="font-semibold text-glow">Панель управления</div>
+          <div className="font-semibold text-foreground">Панель управления</div>
         </div>
       </div>
 
@@ -65,18 +69,18 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition",
-                "text-muted-foreground hover:text-foreground hover:bg-primary/5",
+                "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition",
+                "text-muted-foreground hover:text-foreground hover:bg-card border border-transparent",
                 active &&
-                  "bg-primary/10 text-foreground shadow-neon-sm border border-neon"
+                  "bg-card text-foreground border-border"
               )}
             >
               <Icon
                 className={cn(
                   "h-4 w-4 transition",
                   active
-                    ? "text-primary drop-shadow-[0_0_6px_rgba(168,85,247,0.8)]"
-                    : "text-muted-foreground group-hover:text-primary"
+                    ? "text-foreground"
+                    : "text-muted-foreground group-hover:text-foreground"
                 )}
               />
               <span>{item.label}</span>
@@ -85,7 +89,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="mt-auto rounded-xl border border-neon bg-primary/5 p-4 text-xs text-muted-foreground">
+      <div className="mt-auto rounded-md border border-border bg-card p-4 text-xs text-muted-foreground">
         <p className="font-medium text-foreground mb-1">Подсказка</p>
         <p>Начните с Мониторинга, чтобы оценить состояние школы.</p>
       </div>

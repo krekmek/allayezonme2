@@ -184,7 +184,7 @@ export default function IncidentsPage() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight text-glow flex items-center gap-3">
+        <h1 className="text-4xl font-bold tracking-tight text-neon flex items-center gap-3">
           <AlertTriangle className="h-8 w-8 text-neon" />
           Инциденты
         </h1>
@@ -206,7 +206,7 @@ export default function IncidentsPage() {
             return (
               <div
                 key={col.key}
-                className="bg-surface border border-neon rounded-xl flex flex-col min-h-[400px]"
+                className="bg-card border border-neon rounded-md flex flex-col min-h-[400px]"
               >
                 <div className="px-5 py-4 border-b border-neon flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -260,7 +260,7 @@ function IncidentCard({
 
   return (
     <div
-      className={`rounded-lg border p-3 bg-background/40 transition ${
+      className={`rounded-md border p-3 bg-background/40 transition ${
         isPulsing
           ? "border-neon animate-pulse-neon shadow-neon"
           : "border-neon/40 hover:border-neon"

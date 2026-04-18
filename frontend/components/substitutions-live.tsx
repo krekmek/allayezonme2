@@ -69,10 +69,10 @@ export function SubstitutionsLive() {
   if (subs.length === 0) return null;
 
   return (
-    <section className="bg-surface border border-neon rounded-xl p-6">
+    <section className="bg-card border border-border rounded-md p-6">
       <div className="flex items-center gap-2 mb-4">
-        <UserCheck className="h-5 w-5 text-emerald-400" />
-        <h2 className="text-xl font-semibold">Замены</h2>
+        <UserCheck className="h-5 w-5 text-foreground" />
+        <h2 className="text-xl font-semibold text-foreground">Замены</h2>
         <span className="ml-auto text-xs text-muted-foreground">
           обновляется в реальном времени
         </span>
@@ -90,36 +90,27 @@ export function SubstitutionsLive() {
 function SubCard({ sub }: { sub: Substitution }) {
   const styles = {
     pending: {
-      border: "border-amber-500/50",
-      bg: "bg-amber-500/10",
-      icon: <Clock className="h-4 w-4 text-amber-400" />,
+      dotColor: "bg-yellow-500",
       label: "Ожидает подтверждения",
-      labelCls: "text-amber-300",
     },
     confirmed: {
-      border: "border-emerald-500",
-      bg: "bg-emerald-500/15 shadow-neon",
-      icon: <CheckCircle2 className="h-4 w-4 text-emerald-400" />,
+      dotColor: "bg-emerald-500",
       label: "Подтверждено",
-      labelCls: "text-emerald-300",
     },
     declined: {
-      border: "border-red-500/50",
-      bg: "bg-red-500/10",
-      icon: <XCircle className="h-4 w-4 text-red-400" />,
+      dotColor: "bg-red-500",
       label: "Отклонено",
-      labelCls: "text-red-300",
     },
   }[sub.status];
 
   return (
     <div
-      className={`rounded-lg border ${styles.border} ${styles.bg} p-4 transition-all animate-in fade-in`}
+      className="rounded-md border border-border bg-card/50 p-4 transition-all animate-in fade-in"
     >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5 text-xs">
-          {styles.icon}
-          <span className={styles.labelCls}>{styles.label}</span>
+          <span className={`w-2 h-2 rounded-full ${styles.dotColor}`} />
+          <span className="text-foreground">{styles.label}</span>
         </div>
         <div className="text-xs text-muted-foreground">
           {sub.class_name ? `Класс ${sub.class_name}` : "Класс —"} · Урок{" "}
@@ -136,7 +127,7 @@ function SubCard({ sub }: { sub: Substitution }) {
         </div>
         <div>
           <span className="text-muted-foreground">Заменяет: </span>
-          <span className="font-semibold">{sub.substitute?.fio || "—"}</span>
+          <span className="font-semibold text-foreground">{sub.substitute?.fio || "—"}</span>
         </div>
         {sub.reason && (
           <div className="text-xs text-muted-foreground italic mt-1">

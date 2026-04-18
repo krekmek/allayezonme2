@@ -8,3 +8,5 @@ httpx>=0.26.0
 fastapi
 uvicorn
 python-multipart
+pypdf>=4.0.0
+langchain-text-splitters>=0.2.0

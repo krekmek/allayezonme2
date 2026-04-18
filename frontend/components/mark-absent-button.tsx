@@ -91,7 +91,7 @@ export function MarkAbsentButton({ onAbsenceCreated }: Props) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-500/50 bg-red-500/10 text-red-200 hover:bg-red-500/20 transition"
+        className="flex items-center gap-2 px-4 py-2 rounded-md border border-border bg-card text-foreground hover:bg-card/50 transition"
       >
         <UserX className="h-4 w-4" />
         <span>Отметить заболевшего</span>
@@ -99,16 +99,16 @@ export function MarkAbsentButton({ onAbsenceCreated }: Props) {
 
       {open && (
         <div
-          className="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setOpen(false)}
         >
           <div
-            className="modal-content border border-neon rounded-xl max-w-xl w-full max-h-[85vh] overflow-hidden flex flex-col"
+            className="bg-card border border-border rounded-md max-w-xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-5 border-b border-neon">
+            <div className="flex items-center justify-between p-5 border-b border-border">
               <div>
-                <h3 className="text-lg font-semibold">Отметить заболевшего</h3>
+                <h3 className="text-lg font-semibold text-foreground">Отметить заболевшего</h3>
                 <p className="text-sm text-muted-foreground">
                   Выберите учителя — после этого откроется окно поиска замены
                 </p>
@@ -132,7 +132,7 @@ export function MarkAbsentButton({ onAbsenceCreated }: Props) {
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="Например: Заболел"
-                  className="w-full bg-background border border-neon rounded px-3 py-2 text-sm mt-1"
+                  className="w-full bg-card border border-border rounded px-3 py-2 text-sm mt-1 text-foreground"
                 />
               </div>
 
@@ -143,12 +143,12 @@ export function MarkAbsentButton({ onAbsenceCreated }: Props) {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Поиск учителя по ФИО или предмету..."
-                  className="w-full bg-background border border-neon rounded pl-8 pr-3 py-2 text-sm"
+                  className="w-full bg-card border border-border rounded pl-8 pr-3 py-2 text-sm text-foreground"
                 />
               </div>
 
               {error && (
-                <div className="text-sm rounded-lg px-3 py-2 border bg-red-500/10 border-red-500/40 text-red-200">
+                <div className="text-sm rounded-md px-3 py-2 border bg-card/50 border-border text-muted-foreground">
                   {error}
                 </div>
               )}
@@ -167,14 +167,14 @@ export function MarkAbsentButton({ onAbsenceCreated }: Props) {
                   {filtered.map((t) => (
                     <div
                       key={t.id}
-                      className="flex items-center justify-between gap-3 p-3 rounded-lg border border-neon/40 bg-background/40 hover:border-neon"
+                      className="flex items-center justify-between gap-3 p-3 rounded-md border border-border bg-card/50 hover:border-border"
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium truncate">{t.fio}</div>
+                        <div className="font-medium truncate text-foreground">{t.fio}</div>
                         <div className="text-xs text-muted-foreground">
                           {t.specialization || "—"}
                           {!t.telegram_id && (
-                            <span className="ml-2 text-amber-400">
+                            <span className="ml-2 text-muted-foreground">
                               · нет Telegram
                             </span>
                           )}
@@ -184,7 +184,7 @@ export function MarkAbsentButton({ onAbsenceCreated }: Props) {
                         type="button"
                         onClick={() => markAbsent(t)}
                         disabled={submitting === t.id}
-                        className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-red-500/15 border border-red-500/50 text-red-200 hover:bg-red-500/25 transition disabled:opacity-40"
+                        className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-card border border-border text-foreground hover:bg-card/50 transition disabled:opacity-40"
                       >
                         {submitting === t.id ? (
                           <Loader2 className="h-4 w-4 animate-spin" />

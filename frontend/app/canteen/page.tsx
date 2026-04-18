@@ -110,14 +110,14 @@ export default function CanteenPage() {
     <div className="space-y-6">
       <header className="space-y-2">
         <div className="flex items-center justify-between">
-          <h1 className="text-4xl font-bold tracking-tight text-glow flex items-center gap-3">
+          <h1 className="text-4xl font-bold tracking-tight text-neon flex items-center gap-3">
             <Utensils className="h-8 w-8 text-neon" />
             Столовая
           </h1>
           <button
             onClick={async () => await generateCanteenReport(rows, totalPortions, new Date())}
             disabled={rows.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-neon rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-neon rounded-md transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="h-4 w-4" />
             Скачать PDF
@@ -130,38 +130,38 @@ export default function CanteenPage() {
 
       {/* Счётчик порций */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-surface border border-neon rounded-xl p-5 transition hover:shadow-neon">
+        <div className="bg-card border border-neon rounded-md p-5 transition hover:shadow-neon">
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-primary/10 p-2 text-primary shadow-neon-sm">
               <Users className="h-5 w-5" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Отчётов сегодня</p>
-              <p className="text-2xl font-semibold text-glow">{rows.length}</p>
+              <p className="text-2xl font-semibold text-neon">{rows.length}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-surface border border-neon rounded-xl p-5 transition hover:shadow-neon">
+        <div className="bg-card border border-neon rounded-md p-5 transition hover:shadow-neon">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-neon/10 p-2 text-neon shadow-neon-sm animate-pulse-neon">
+            <div className="rounded-lg bg-primary/10 p-2 text-primary animate-pulse-neon shadow-neon">
               <TrendingUp className="h-5 w-5" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Итого порций</p>
-              <p className="text-2xl font-semibold text-glow">{totalPortions}</p>
+              <p className="text-2xl font-semibold text-neon">{totalPortions}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-surface border border-neon rounded-xl p-5 transition hover:shadow-neon">
+        <div className="bg-card border border-neon rounded-md p-5 transition hover:shadow-neon">
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-primary/10 p-2 text-primary shadow-neon-sm">
               <Clock className="h-5 w-5" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Последний отчёт</p>
-              <p className="text-lg font-semibold">
+              <p className="text-lg font-semibold text-foreground">
                 {rows.length > 0 ? rows[0].time : "—"}
               </p>
             </div>
@@ -170,9 +170,9 @@ export default function CanteenPage() {
       </div>
 
       {/* Таблица присутствующих */}
-      <div className="bg-surface border border-neon rounded-xl overflow-hidden">
+      <div className="bg-card border border-neon rounded-md overflow-hidden">
         <div className="px-6 py-4 border-b border-neon">
-          <h2 className="text-lg font-semibold">Таблица присутствующих</h2>
+          <h2 className="text-lg font-semibold text-foreground">Таблица присутствующих</h2>
         </div>
 
         {loading ? (
@@ -215,7 +215,7 @@ export default function CanteenPage() {
                       <span
                         className={`inline-flex items-center justify-center rounded-full px-3 py-1 text-sm font-semibold ${
                           row.isPulsing
-                            ? "bg-neon text-white shadow-neon"
+                            ? "bg-neon text-foreground shadow-neon"
                             : "bg-primary/10 text-primary"
                         }`}
                       >

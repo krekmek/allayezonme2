@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   XCircle,
 } from "lucide-react";
+import { GenerateDocumentButton } from "@/components/generate-document-button";
 
 type Source = {
   source: string;
@@ -214,18 +215,21 @@ export default function KnowledgePage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)] space-y-4">
-      <header className="space-y-2 shrink-0">
-        <h1 className="text-4xl font-bold tracking-tight text-glow flex items-center gap-3">
-          <BookOpenText className="h-8 w-8 text-neon" />
-          Помощник по приказам
-        </h1>
-        <p className="text-muted-foreground">
-          Спросите по регламенту: приём, питание, режим занятий. Ответы — из
-          приказов №76, №110, №130 с указанием источника.
-        </p>
+      <header className="shrink-0 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+        <div className="space-y-2">
+          <h1 className="text-4xl font-bold tracking-tight text-neon flex items-center gap-3">
+            <BookOpenText className="h-8 w-8 text-neon" />
+            Помощник по приказам
+          </h1>
+          <p className="text-muted-foreground">
+            Спросите по регламенту: приём, питание, режим занятий. Ответы — из
+            приказов №76, №110, №130 с указанием источника.
+          </p>
+        </div>
+        <GenerateDocumentButton />
       </header>
 
-      <div className="flex-1 min-h-0 bg-surface border border-neon rounded-xl flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 bg-card border border-neon rounded-md flex flex-col overflow-hidden">
         {/* История сообщений */}
         <div
           ref={scrollRef}

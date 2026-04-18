@@ -49,11 +49,9 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // Кастомные «неоновые» оттенки
+        // Monochrome neon
         neon: {
-          DEFAULT: "#a855f7",
-          soft: "#7c3aed",
-          glow: "rgba(168, 85, 247, 0.45)",
+          DEFAULT: "hsl(var(--neon-color))",
         },
       },
       borderRadius: {
@@ -62,15 +60,14 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        "neon-sm": "0 0 8px rgba(168, 85, 247, 0.45)",
-        neon: "0 0 18px rgba(168, 85, 247, 0.55), 0 0 36px rgba(168, 85, 247, 0.25)",
-        "neon-lg":
-          "0 0 22px rgba(168, 85, 247, 0.7), 0 0 60px rgba(168, 85, 247, 0.35)",
+        "neon-sm": "0 0 8px var(--neon-glow)",
+        neon: "0 0 18px var(--neon-glow), 0 0 36px var(--neon-glow)",
+        "neon-lg": "0 0 22px var(--neon-glow), 0 0 60px var(--neon-glow)",
       },
       keyframes: {
         "pulse-neon": {
-          "0%, 100%": { boxShadow: "0 0 14px rgba(168,85,247,0.45)" },
-          "50%": { boxShadow: "0 0 26px rgba(168,85,247,0.75)" },
+          "0%, 100%": { boxShadow: "0 0 14px var(--neon-glow)" },
+          "50%": { boxShadow: "0 0 26px var(--neon-glow)" },
         },
       },
       animation: {

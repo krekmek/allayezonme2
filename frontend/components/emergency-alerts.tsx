@@ -117,10 +117,10 @@ export function EmergencyAlerts() {
 
   if (loading) {
     return (
-      <section className="bg-surface border border-neon rounded-xl p-6">
+      <section className="bg-card border border-border rounded-md p-6">
         <div className="flex items-center gap-2 mb-4">
-          <AlertTriangle className="h-5 w-5 text-red-400" />
-          <h2 className="text-xl font-semibold">Срочные уведомления</h2>
+          <AlertTriangle className="h-5 w-5 text-foreground" />
+          <h2 className="text-xl font-semibold text-foreground">Срочные уведомления</h2>
         </div>
         <p className="text-muted-foreground">Загрузка...</p>
       </section>
@@ -130,10 +130,10 @@ export function EmergencyAlerts() {
   if (absences.length === 0) {
     return (
       <>
-        <section className="bg-surface border border-neon rounded-xl p-6">
+        <section className="bg-card border border-border rounded-md p-6">
           <div className="flex items-center gap-2 mb-4">
-            <AlertTriangle className="h-5 w-5 text-red-400" />
-            <h2 className="text-xl font-semibold">Срочные уведомления</h2>
+            <AlertTriangle className="h-5 w-5 text-foreground" />
+            <h2 className="text-xl font-semibold text-foreground">Срочные уведомления</h2>
             <div className="ml-auto">
               <MarkAbsentButton onAbsenceCreated={handleAbsenceCreated} />
             </div>
@@ -153,11 +153,11 @@ export function EmergencyAlerts() {
 
   return (
     <>
-      <section className="bg-surface border border-red-500/50 rounded-xl p-6 shadow-neon">
+      <section className="bg-card border border-border rounded-md p-6">
         <div className="flex items-center gap-2 mb-4 flex-wrap">
-          <AlertTriangle className="h-5 w-5 text-red-400 animate-pulse" />
-          <h2 className="text-xl font-semibold">Срочные уведомления</h2>
-          <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-300 border border-red-500">
+          <AlertTriangle className="h-5 w-5 text-foreground animate-pulse" />
+          <h2 className="text-xl font-semibold text-foreground">Срочные уведомления</h2>
+          <span className="text-xs px-2 py-1 rounded-full bg-card border border-border text-muted-foreground">
             {absences.length} активных
           </span>
           <div className="ml-auto">
@@ -169,12 +169,12 @@ export function EmergencyAlerts() {
           {absences.map((absence, idx) => (
             <div
               key={absence.id}
-              className="border border-red-500/40 rounded-lg p-4 bg-red-500/5 animate-in slide-in-from-left-4"
+              className="border border-border rounded-md p-4 bg-card/50 animate-in slide-in-from-left-4"
               style={{ animationDelay: `${idx * 80}ms` }}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <div className="rounded-full bg-red-500/20 p-2 text-red-300">
+                  <div className="rounded-full bg-card border border-border p-2 text-foreground">
                     <UserX className="h-5 w-5" />
                   </div>
                   <div className="flex-1 min-w-0 space-y-2">
@@ -189,7 +189,7 @@ export function EmergencyAlerts() {
                     </div>
 
                     {absence.reason_text && (
-                      <div className="text-sm text-foreground/90 bg-background/40 rounded px-3 py-2 border border-neon/20">
+                      <div className="text-sm text-foreground bg-card rounded px-3 py-2 border border-border">
                         {absence.reason_text}
                       </div>
                     )}
@@ -208,7 +208,7 @@ export function EmergencyAlerts() {
                   <button
                     type="button"
                     onClick={() => setSelectedAbsence(absence)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-primary/15 border border-neon text-primary hover:bg-primary/25 transition"
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-md bg-card border border-border text-foreground hover:bg-card/50 transition"
                   >
                     <Search className="h-4 w-4" />
                     Найти замену
@@ -217,7 +217,7 @@ export function EmergencyAlerts() {
                     type="button"
                     onClick={() => cancelAbsence(absence)}
                     disabled={cancellingId === absence.id}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border border-muted-foreground/30 text-muted-foreground hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/50 transition disabled:opacity-40"
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-card/50 transition disabled:opacity-40"
                     title="Отметили по ошибке? Отмените"
                   >
                     {cancellingId === absence.id ? (
@@ -315,18 +315,18 @@ function SubstitutionModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="modal-content border border-neon rounded-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col"
+        className="bg-card border border-border rounded-md max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-5 border-b border-neon">
+        <div className="flex items-center justify-between p-5 border-b border-border">
           <div>
-            <h3 className="text-lg font-semibold">Назначить замену</h3>
+            <h3 className="text-lg font-semibold text-foreground">Назначить замену</h3>
             <p className="text-sm text-muted-foreground">
-              Отсутствует: <b>{absence.staff?.fio}</b> · {absence.staff?.specialization}
+              Отсутствует: <b className="text-foreground">{absence.staff?.fio}</b> · {absence.staff?.specialization}
             </p>
             {absence.reason_text && (
               <p className="text-xs text-muted-foreground mt-1 italic">
@@ -349,7 +349,7 @@ function SubstitutionModal({
             <select
               value={lessonNumber}
               onChange={(e) => setLessonNumber(Number(e.target.value))}
-              className="bg-background border border-neon rounded px-3 py-1.5 text-sm"
+              className="bg-card border border-border rounded px-3 py-1.5 text-sm text-foreground"
             >
               {[1, 2, 3, 4, 5, 6, 7].map((n) => (
                 <option key={n} value={n}>
@@ -363,8 +363,8 @@ function SubstitutionModal({
             <div
               className={`text-sm rounded-lg px-3 py-2 border ${
                 result.ok
-                  ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-200"
-                  : "bg-red-500/10 border-red-500/40 text-red-200"
+                  ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
+                  : "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-800 text-red-700 dark:text-red-300"
               }`}
             >
               {result.message}
@@ -385,16 +385,16 @@ function SubstitutionModal({
               {candidates.map((cand) => (
                 <div
                   key={cand.id}
-                  className="flex items-start justify-between gap-3 p-3 rounded-lg border border-neon/40 bg-background/40"
+                  className="flex items-start justify-between gap-3 p-3 rounded-md border border-border bg-card/50"
                 >
                   <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-400 mt-0.5 shrink-0" />
+                    <CheckCircle2 className="h-5 w-5 text-foreground mt-0.5 shrink-0" />
                     <div className="min-w-0">
-                      <div className="font-medium">{cand.fio}</div>
+                      <div className="font-medium text-foreground">{cand.fio}</div>
                       <div className="text-xs text-muted-foreground">
                         {cand.specialization || "—"}
                         {!cand.telegram_id && (
-                          <span className="ml-2 text-amber-400">· нет Telegram</span>
+                          <span className="ml-2 text-muted-foreground">· нет Telegram</span>
                         )}
                       </div>
                       {cand.warnings && cand.warnings.length > 0 && (
@@ -402,7 +402,7 @@ function SubstitutionModal({
                           {cand.warnings.map((w, i) => (
                             <div
                               key={i}
-                              className="text-xs text-amber-400 flex items-center gap-1"
+                              className="text-xs text-muted-foreground flex items-center gap-1"
                             >
                               <AlertTriangle className="h-3 w-3" />
                               {w}
@@ -417,7 +417,7 @@ function SubstitutionModal({
                     type="button"
                     onClick={() => assignCandidate(cand)}
                     disabled={assigningId === cand.id || !cand.telegram_id}
-                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-primary/15 border border-neon text-primary hover:bg-primary/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-card border border-border text-foreground hover:bg-card/50 transition disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {assigningId === cand.id ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

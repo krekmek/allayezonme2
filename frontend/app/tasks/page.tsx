@@ -151,7 +151,7 @@ export default function TasksPage() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight text-glow flex items-center gap-3">
+        <h1 className="text-4xl font-bold tracking-tight text-neon flex items-center gap-3">
           <ListTodo className="h-8 w-8 text-neon" />
           Задачи
         </h1>
@@ -174,7 +174,7 @@ export default function TasksPage() {
             return (
               <div
                 key={col.key}
-                className="border-gradient bg-surface rounded-lg p-4 hover:border-neon transition"
+                className="border border-border bg-card rounded-md p-4 hover:border-neon transition"
               >
                 <div className="px-5 py-4 border-b border-neon flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -227,7 +227,7 @@ function TaskCard({
   const next = NEXT[task.status];
   return (
     <div
-      className={`border-gradient bg-surface p-3 transition ${
+      className={`border border-border bg-card p-3 transition ${
         isPulsing
           ? "border-neon animate-pulse-neon shadow-neon"
           : ""
@@ -249,7 +249,7 @@ function TaskCard({
           </span>
         )}
         {task.source === "voice" && (
-          <span className="inline-flex items-center gap-1 text-amber-300">
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
             <Mic className="h-3 w-3" />
             голос
           </span>
@@ -262,7 +262,7 @@ function TaskCard({
           type="button"
           disabled={!prev || isUpdating}
           onClick={() => prev && onStatusChange(task.id, prev)}
-          className="flex-1 inline-flex items-center justify-center gap-1 rounded-md border border-neon/40 px-2 py-1.5 text-xs transition hover:bg-primary/10 hover:border-neon disabled:opacity-30 disabled:cursor-not-allowed"
+          className="flex-1 inline-flex items-center justify-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs transition hover:bg-primary/10 hover:border-neon disabled:opacity-30 disabled:cursor-not-allowed"
           title={prev ? `В «${labelFor(prev)}»` : "Нет предыдущего статуса"}
         >
           <ChevronLeft className="h-3.5 w-3.5" />

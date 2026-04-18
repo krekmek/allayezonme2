@@ -42,6 +42,7 @@ from db import (
 )
 from logic import find_substitution, generate_tomorrow_substitution_draft
 from nlp_processor import classify_message, extract_attendance_data
+from rag_service import generate_official_document
 from main import start_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -282,6 +283,14 @@ async def handle_help(message: Message) -> None:
             "<b>Для учителей:</b>",
             "/report — отправить отчёт по столовой",
             "/points — показать ваши очки оперативности",
+            "",
+        ])
+
+    if role in ("director", ROLE_ADMIN):
+        lines.extend([
+            "<b>Для директора/админа:</b>",
+            "/generate &lt;суть&gt; — сгенерировать официальный приказ на основе базы знаний",
+            "  <i>Пример: /generate приказ о замене учителя математики на завтра</i>",
             "",
         ])
 
@@ -1131,6 +1140,79 @@ async def handle_points(message: Message) -> None:
     await message.answer("\n".join(lines))
 
 
+@dp.message(Command("generate"))
+async def handle_generate(message: Message) -> None:
+    """Сгенерировать официальный приказ на основе базы знаний (RAG).
+    Использование: /generate <суть распоряжения>
+    """
+    staff = await get_current_staff(message)
+    if staff is None:
+        await message.answer("Сначала зарегистрируйтесь через /start.")
+        return
+    if staff.get("role") not in ("director", "admin"):
+        await message.answer("⛔ Команда доступна только директору/администратору.")
+        return
+
+    # Текст после команды
+    text = (message.text or "").split(maxsplit=1)
+    if len(text) < 2 or not text[1].strip():
+        await message.answer(
+            "Использование: <code>/generate &lt;суть распоряжения&gt;</code>\n\n"
+            "Пример: <code>/generate приказ о замене учителя математики на завтра</code>"
+        )
+        return
+
+    user_request = text[1].strip()
+    status_msg = await message.answer("🔍 Ищу в базе знаний и составляю приказ...")
+
+    try:
+        result = await generate_official_document(
+            user_request,
+            director_name=staff.get("fio", "И.О. Директора"),
+        )
+    except Exception as exc:
+        logging.exception("generate_official_document failed")
+        await status_msg.edit_text(f"❌ Ошибка: {exc}")
+        return
+
+    document = result.get("document", "").strip() or "(пустой ответ)"
+    used = result.get("used_sources") or []
+    footer = (
+        f"\n\n<i>📚 Сформировано на основе: {', '.join(used)}</i>"
+        if used
+        else "\n\n<i>⚠ Релевантных фрагментов в базе знаний не найдено.</i>"
+    )
+
+    # Telegram ограничение: 4096 символов на сообщение
+    MAX = 3800
+    body = f"<pre>{_escape_html(document)}</pre>{footer}"
+    if len(body) <= MAX:
+        await status_msg.edit_text(body)
+    else:
+        await status_msg.edit_text(footer.strip() or "📄 Документ готов:")
+        # Шлём длинный документ кусками
+        chunk = []
+        size = 0
+        for line in document.splitlines(keepends=True):
+            if size + len(line) > MAX:
+                await message.answer(f"<pre>{_escape_html(''.join(chunk))}</pre>")
+                chunk = [line]
+                size = len(line)
+            else:
+                chunk.append(line)
+                size += len(line)
+        if chunk:
+            await message.answer(f"<pre>{_escape_html(''.join(chunk))}</pre>")
+
+
+def _escape_html(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
 @dp.message(Command("whoami"))
 async def handle_whoami(message: Message) -> None:
     real_id = message.from_user.id
@@ -1322,6 +1404,7 @@ async def set_bot_commands() -> None:
         BotCommand(command="whoami", description="Мой профиль"),
         BotCommand(command="report", description="Отчёт по столовой"),
         BotCommand(command="points", description="Очки оперативности"),
+        BotCommand(command="generate", description="Сгенерировать приказ (RAG)"),
         BotCommand(command="cancel", description="Отменить действие"),
         BotCommand(command="login_as", description="DEV: войти как сотрудник"),
         BotCommand(command="logout", description="DEV: выйти из имитации"),
