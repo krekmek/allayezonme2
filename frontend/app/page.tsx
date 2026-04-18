@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Activity, AlertTriangle, CalendarDays, BookOpenText, Trophy } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { EmergencyAlerts } from "@/components/emergency-alerts";
+import { SubstitutionsLive } from "@/components/substitutions-live";
 
 const cards = [
   {
@@ -102,6 +103,8 @@ export default function HomePage() {
       </div>
 
       <EmergencyAlerts />
+
+      <SubstitutionsLive />
 
       <section className="bg-surface border border-neon rounded-xl p-6">
         <div className="flex items-center gap-2 mb-4">

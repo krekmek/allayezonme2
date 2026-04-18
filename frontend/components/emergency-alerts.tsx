@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, UserX, Search, X, Loader2, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, UserX, Search, X, Loader2, CheckCircle2, Send, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { MarkAbsentButton } from "./mark-absent-button";
 
 type Staff = {
   id: number;
@@ -35,6 +36,51 @@ export function EmergencyAlerts() {
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAbsence, setSelectedAbsence] = useState<Absence | null>(null);
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
+
+  async function cancelAbsence(absence: Absence) {
+    const fio = absence.staff?.fio || "учителя";
+    if (!confirm(`Отменить отсутствие ${fio}?`)) return;
+    setCancellingId(absence.id);
+    try {
+      const resp = await fetch(
+        `http://localhost:8001/api/absences/${absence.id}/cancel`,
+        { method: "POST" }
+      );
+      const data = await resp.json();
+      if (!data.ok) {
+        alert("Не удалось отменить: " + (data.error || "ошибка"));
+      }
+      // Realtime подтянет изменение, но перегружаем для мгновенного UX
+      await loadAbsences();
+    } catch (e: any) {
+      alert("Ошибка сети: " + e?.message);
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  // Обработчик: директор отметил учителя заболевшим → автоматически открываем замену
+  function handleAbsenceCreated(payload: {
+    absence_id: number;
+    teacher: Staff;
+    reason_text: string;
+  }) {
+    const newAbsence: Absence = {
+      id: payload.absence_id,
+      teacher_id: payload.teacher.id,
+      date: new Date().toISOString().slice(0, 10),
+      reason_text: payload.reason_text,
+      voice_url: null,
+      status: "pending",
+      created_at: new Date().toISOString(),
+      staff: payload.teacher,
+    };
+    // Сразу открываем модалку замены
+    setSelectedAbsence(newAbsence);
+    // Перегружаем список (realtime тоже сработает, но быстрее сразу обновить)
+    loadAbsences();
+  }
 
   async function loadAbsences() {
     try {
@@ -83,25 +129,40 @@ export function EmergencyAlerts() {
 
   if (absences.length === 0) {
     return (
-      <section className="bg-surface border border-neon rounded-xl p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <AlertTriangle className="h-5 w-5 text-red-400" />
-          <h2 className="text-xl font-semibold">Срочные уведомления</h2>
-        </div>
-        <p className="text-muted-foreground">Нет активных заявок об отсутствии</p>
-      </section>
+      <>
+        <section className="bg-surface border border-neon rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle className="h-5 w-5 text-red-400" />
+            <h2 className="text-xl font-semibold">Срочные уведомления</h2>
+            <div className="ml-auto">
+              <MarkAbsentButton onAbsenceCreated={handleAbsenceCreated} />
+            </div>
+          </div>
+          <p className="text-muted-foreground">Нет активных заявок об отсутствии</p>
+        </section>
+
+        {selectedAbsence && (
+          <SubstitutionModal
+            absence={selectedAbsence}
+            onClose={() => setSelectedAbsence(null)}
+          />
+        )}
+      </>
     );
   }
 
   return (
     <>
       <section className="bg-surface border border-red-500/50 rounded-xl p-6 shadow-neon">
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
           <AlertTriangle className="h-5 w-5 text-red-400 animate-pulse" />
           <h2 className="text-xl font-semibold">Срочные уведомления</h2>
-          <span className="ml-auto text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-300 border border-red-500">
+          <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-300 border border-red-500">
             {absences.length} активных
           </span>
+          <div className="ml-auto">
+            <MarkAbsentButton onAbsenceCreated={handleAbsenceCreated} />
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -143,14 +204,30 @@ export function EmergencyAlerts() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setSelectedAbsence(absence)}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-primary/15 border border-neon text-primary hover:bg-primary/25 transition"
-                >
-                  <Search className="h-4 w-4" />
-                  Найти замену
-                </button>
+                <div className="shrink-0 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAbsence(absence)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-primary/15 border border-neon text-primary hover:bg-primary/25 transition"
+                  >
+                    <Search className="h-4 w-4" />
+                    Найти замену
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cancelAbsence(absence)}
+                    disabled={cancellingId === absence.id}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border border-muted-foreground/30 text-muted-foreground hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/50 transition disabled:opacity-40"
+                    title="Отметили по ошибке? Отмените"
+                  >
+                    {cancellingId === absence.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    Отменить
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -177,6 +254,8 @@ function SubstitutionModal({
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [lessonNumber, setLessonNumber] = useState(1);
+  const [assigningId, setAssigningId] = useState<number | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   async function loadCandidates() {
     setLoading(true);
@@ -198,6 +277,38 @@ function SubstitutionModal({
     }
   }
 
+  async function assignCandidate(cand: Candidate) {
+    setAssigningId(cand.id);
+    setResult(null);
+    try {
+      const resp = await fetch(
+        "http://localhost:8001/api/request-substitution",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            absent_teacher_id: absence.teacher_id,
+            candidate_id: cand.id,
+            absence_id: absence.id,
+            lesson_number: lessonNumber,
+            reason: absence.reason_text || "Учитель отсутствует",
+          }),
+        }
+      );
+      const data = await resp.json();
+      setResult({
+        ok: !!data.ok,
+        message: data.ok
+          ? `✅ Замена создана${data.notified ? `, уведомление отправлено: ${cand.fio}` : " (push не доставлен)"}`
+          : `❌ ${data.error || data.message || "Ошибка"}`,
+      });
+    } catch (e: any) {
+      setResult({ ok: false, message: `❌ Ошибка сети: ${e?.message || e}` });
+    } finally {
+      setAssigningId(null);
+    }
+  }
+
   useEffect(() => {
     loadCandidates();
   }, [lessonNumber]);
@@ -213,10 +324,15 @@ function SubstitutionModal({
       >
         <div className="flex items-center justify-between p-5 border-b border-neon">
           <div>
-            <h3 className="text-lg font-semibold">Поиск замены</h3>
+            <h3 className="text-lg font-semibold">Назначить замену</h3>
             <p className="text-sm text-muted-foreground">
-              {absence.staff?.fio} · {absence.staff?.specialization}
+              Отсутствует: <b>{absence.staff?.fio}</b> · {absence.staff?.specialization}
             </p>
+            {absence.reason_text && (
+              <p className="text-xs text-muted-foreground mt-1 italic">
+                Причина: {absence.reason_text}
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -243,6 +359,18 @@ function SubstitutionModal({
             </select>
           </div>
 
+          {result && (
+            <div
+              className={`text-sm rounded-lg px-3 py-2 border ${
+                result.ok
+                  ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-200"
+                  : "bg-red-500/10 border-red-500/40 text-red-200"
+              }`}
+            >
+              {result.message}
+            </div>
+          )}
+
           {loading ? (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -257,14 +385,17 @@ function SubstitutionModal({
               {candidates.map((cand) => (
                 <div
                   key={cand.id}
-                  className="flex items-start justify-between p-3 rounded-lg border border-neon/40 bg-background/40"
+                  className="flex items-start justify-between gap-3 p-3 rounded-lg border border-neon/40 bg-background/40"
                 >
-                  <div className="flex items-start gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-400 mt-0.5" />
-                    <div>
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-400 mt-0.5 shrink-0" />
+                    <div className="min-w-0">
                       <div className="font-medium">{cand.fio}</div>
                       <div className="text-xs text-muted-foreground">
-                        {cand.specialization}
+                        {cand.specialization || "—"}
+                        {!cand.telegram_id && (
+                          <span className="ml-2 text-amber-400">· нет Telegram</span>
+                        )}
                       </div>
                       {cand.warnings && cand.warnings.length > 0 && (
                         <div className="mt-1 space-y-0.5">
@@ -281,6 +412,20 @@ function SubstitutionModal({
                       )}
                     </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => assignCandidate(cand)}
+                    disabled={assigningId === cand.id || !cand.telegram_id}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-primary/15 border border-neon text-primary hover:bg-primary/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {assigningId === cand.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                    Назначить
+                  </button>
                 </div>
               ))}
             </div>

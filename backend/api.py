@@ -14,7 +14,15 @@ from pydantic import BaseModel
 
 from audio import transcribe_ogg
 from config import settings
-from db import create_task_from_dashboard, list_pending_absences, list_staff
+from db import (
+    create_absence,
+    create_substitution,
+    create_task_from_dashboard,
+    get_staff_by_id,
+    list_pending_absences,
+    list_staff,
+    update_absence_status,
+)
 from logic import find_substitution
 import notifications
 
@@ -185,6 +193,122 @@ async def process_voice(audio: UploadFile = File(...)) -> dict[str, Any]:
 async def get_absences() -> list[dict[str, Any]]:
     """Получить заявки об отсутствии со статусом pending + информация об учителе."""
     return await list_pending_absences()
+
+
+@app.get("/api/staff")
+async def get_staff_list() -> list[dict[str, Any]]:
+    """Список всех сотрудников школы."""
+    return await list_staff()
+
+
+class CreateAbsenceRequest(BaseModel):
+    teacher_id: int
+    reason_text: str | None = None
+
+
+@app.post("/api/absences/{absence_id}/cancel")
+async def cancel_absence(absence_id: int) -> dict[str, Any]:
+    """Отменить заявку об отсутствии (случайно отметили)."""
+    updated = await update_absence_status(absence_id, "rejected")
+    return {"ok": bool(updated), "absence": updated}
+
+
+@app.post("/api/absences")
+async def create_absence_endpoint(request: CreateAbsenceRequest) -> dict[str, Any]:
+    """Создать заявку об отсутствии учителя (с дашборда директора)."""
+    teacher = await get_staff_by_id(request.teacher_id)
+    if not teacher:
+        return {"ok": False, "error": "Учитель не найден"}
+
+    absence = await create_absence(
+        teacher_id=request.teacher_id,
+        reason_text=request.reason_text,
+    )
+
+    return {
+        "ok": True,
+        "absence": absence,
+        "teacher": {"id": teacher["id"], "fio": teacher["fio"]},
+    }
+
+
+class RequestSubstitutionRequest(BaseModel):
+    absent_teacher_id: int
+    candidate_id: int
+    absence_id: int | None = None
+    lesson_number: int | None = None
+    class_name: str | None = None
+    subject: str | None = None
+    room: str | None = None
+    reason: str | None = None
+    day_of_week: int | None = None
+
+
+@app.post("/api/request-substitution")
+async def request_substitution(request: RequestSubstitutionRequest) -> dict[str, Any]:
+    """Создать запись о замене со статусом 'pending' и отправить push кандидату.
+
+    - Создаёт запись в `substitutions`.
+    - Если передан `absence_id` — помечает заявку об отсутствии как `approved`.
+    - Отправляет в Telegram кнопки [✅ Принять] / [❌ Отклонить]."""
+    absent = await get_staff_by_id(request.absent_teacher_id)
+    candidate = await get_staff_by_id(request.candidate_id)
+
+    if not absent:
+        return {"ok": False, "error": "Отсутствующий учитель не найден"}
+    if not candidate:
+        return {"ok": False, "error": "Кандидат не найден"}
+    if not candidate.get("telegram_id"):
+        return {
+            "ok": False,
+            "error": f"У кандидата {candidate.get('fio')} не указан Telegram ID",
+        }
+
+    # 1. Создаём запись в substitutions
+    substitution = await create_substitution(
+        absent_teacher_id=absent["id"],
+        substitute_teacher_id=candidate["id"],
+        absence_id=request.absence_id,
+        lesson_number=request.lesson_number,
+        class_name=request.class_name,
+        subject=request.subject,
+        room=request.room,
+        reason=request.reason,
+        day_of_week=request.day_of_week,
+    )
+    sub_id = substitution.get("id") if substitution else None
+
+    # 2. Помечаем absence как approved (если указан)
+    if request.absence_id:
+        try:
+            await update_absence_status(request.absence_id, "approved")
+        except Exception:
+            pass
+
+    # 3. Push в Telegram
+    notified = False
+    if sub_id:
+        notified = await notifications.send_substitution_notification(
+            substitution_id=sub_id,
+            candidate=candidate,
+            absent_teacher=absent,
+            lesson_number=request.lesson_number,
+            class_name=request.class_name,
+            subject=request.subject,
+            room=request.room,
+            reason=request.reason,
+        )
+
+    return {
+        "ok": bool(sub_id),
+        "notified": notified,
+        "substitution": substitution,
+        "message": (
+            f"Замена создана, уведомление отправлено {candidate.get('fio')}"
+            if notified
+            else "Замена создана, но уведомление не отправлено"
+        ),
+    }
 
 
 @app.get("/api/substitution/{teacher_id}")

@@ -409,3 +409,101 @@ async def list_pending_absences() -> list[dict[str, Any]]:
         return resp.data or []
 
     return await asyncio.to_thread(_run)
+
+
+async def update_absence_status(absence_id: int, status: str) -> dict[str, Any] | None:
+    """Обновить статус заявки об отсутствии ('pending'|'approved'|'rejected'|'resolved')."""
+    def _run() -> dict[str, Any] | None:
+        resp = (
+            supabase.table("absences")
+            .update({"status": status})
+            .eq("id", absence_id)
+            .execute()
+        )
+        return (resp.data or [None])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+# ---------------------- SUBSTITUTIONS ----------------------
+
+async def create_substitution(
+    absent_teacher_id: int,
+    substitute_teacher_id: int,
+    *,
+    absence_id: int | None = None,
+    lesson_number: int | None = None,
+    class_name: str | None = None,
+    subject: str | None = None,
+    room: str | None = None,
+    reason: str | None = None,
+    day_of_week: int | None = None,
+    date: str | None = None,
+) -> dict[str, Any]:
+    """Создать запись о замене со статусом 'pending'."""
+    def _run() -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "absent_teacher_id": absent_teacher_id,
+            "substitute_teacher_id": substitute_teacher_id,
+            "status": "pending",
+        }
+        if absence_id is not None:
+            payload["absence_id"] = absence_id
+        if lesson_number is not None:
+            payload["lesson_number"] = lesson_number
+        if class_name:
+            payload["class_name"] = class_name
+        if subject:
+            payload["subject"] = subject
+        if room:
+            payload["room"] = room
+        if reason:
+            payload["reason"] = reason
+        if day_of_week is not None:
+            payload["day_of_week"] = day_of_week
+        if date:
+            payload["date"] = date
+
+        resp = supabase.table("substitutions").insert(payload).execute()
+        return (resp.data or [{}])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+async def get_substitution_by_id(sub_id: int) -> dict[str, Any] | None:
+    """Получить замену по id с JOIN staff (absent + substitute)."""
+    def _run() -> dict[str, Any] | None:
+        resp = (
+            supabase.table("substitutions")
+            .select(
+                "*, "
+                "absent:absent_teacher_id(id, fio, telegram_id, specialization), "
+                "substitute:substitute_teacher_id(id, fio, telegram_id, specialization)"
+            )
+            .eq("id", sub_id)
+            .limit(1)
+            .execute()
+        )
+        return (resp.data or [None])[0]
+
+    return await asyncio.to_thread(_run)
+
+
+async def update_substitution_status(
+    sub_id: int, status: str
+) -> dict[str, Any] | None:
+    """Обновить статус замены ('pending'|'confirmed'|'declined')."""
+    def _run() -> dict[str, Any] | None:
+        payload: dict[str, Any] = {"status": status}
+        if status == "confirmed":
+            from datetime import datetime, timezone
+            payload["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+        resp = (
+            supabase.table("substitutions")
+            .update(payload)
+            .eq("id", sub_id)
+            .execute()
+        )
+        return (resp.data or [None])[0]
+
+    return await asyncio.to_thread(_run)

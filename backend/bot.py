@@ -32,9 +32,11 @@ from db import (
     get_staff_by_id,
     get_staff_by_name,
     get_staff_by_tg_id,
+    get_substitution_by_id,
     get_teacher_points,
     list_staff,
     search_tasks_by_date,
+    update_substitution_status,
     update_task_status,
     upload_voice_note,
 )
@@ -913,6 +915,86 @@ async def handle_task_callback(query: CallbackQuery) -> None:
     logging.info(
         "Task %s status updated to %s by user %s",
         task_id, new_status, query.from_user.id
+    )
+
+
+# ---------------------- Callback-кнопки для замен ----------------------
+
+@dp.callback_query(F.data.startswith("sub:"))
+async def handle_substitution_callback(query: CallbackQuery) -> None:
+    """Обработать нажатие [✅ Принять] / [❌ Отклонить] на уведомлении о замене."""
+    try:
+        parts = query.data.split(":")
+        _, action, sub_id_str = parts[0], parts[1], parts[2]
+        sub_id = int(sub_id_str)
+    except (ValueError, IndexError):
+        await query.answer("Некорректные данные", show_alert=True)
+        return
+
+    if action not in ("confirm", "decline"):
+        await query.answer("Неизвестное действие", show_alert=True)
+        return
+
+    sub = await get_substitution_by_id(sub_id)
+    if not sub:
+        await query.answer("Замена не найдена", show_alert=True)
+        return
+
+    if sub.get("status") != "pending":
+        await query.answer(
+            f"Уже обработано: {sub.get('status')}", show_alert=True
+        )
+        return
+
+    new_status = "confirmed" if action == "confirm" else "declined"
+    await update_substitution_status(sub_id, new_status)
+
+    # Редактируем сообщение: убираем кнопки и показываем результат
+    old_text = query.message.html_text if query.message else ""
+    badge = "✅ Вы приняли замену" if action == "confirm" else "❌ Вы отклонили замену"
+    new_text = f"{old_text}\n\n<b>{badge}</b>"
+
+    try:
+        await query.message.edit_text(
+            text=new_text,
+            reply_markup=None,
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await query.answer("Принято ✅" if action == "confirm" else "Отклонено ❌")
+
+    # Уведомляем директора (отсутствующего учителя) о решении
+    absent = sub.get("absent") or {}
+    substitute = sub.get("substitute") or {}
+    absent_tg = absent.get("telegram_id")
+    substitute_name = substitute.get("fio", "Учитель")
+    class_name = sub.get("class_name") or "—"
+    lesson_number = sub.get("lesson_number") or "—"
+
+    if absent_tg:
+        if action == "confirm":
+            notify_text = (
+                f"✅ <b>{substitute_name}</b> подтвердил(а) замену\n"
+                f"Класс: {class_name}, урок: {lesson_number}"
+            )
+        else:
+            notify_text = (
+                f"❌ <b>{substitute_name}</b> отклонил(а) замену\n"
+                f"Класс: {class_name}, урок: {lesson_number}\n"
+                f"Нужно выбрать другого учителя."
+            )
+        try:
+            await bot.send_message(
+                chat_id=absent_tg, text=notify_text, parse_mode="HTML"
+            )
+        except Exception:
+            logging.exception("Failed to notify absent teacher about sub decision")
+
+    logging.info(
+        "Substitution %s -> %s by user %s",
+        sub_id, new_status, query.from_user.id,
     )
 
 

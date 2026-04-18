@@ -82,3 +82,81 @@ async def send_task_notification(task: dict[str, Any]) -> None:
         logger.exception(
             "Failed to send task notification to %s", staff["fio"]
         )
+
+
+async def send_substitution_notification(
+    substitution_id: int,
+    candidate: dict[str, Any],
+    absent_teacher: dict[str, Any],
+    lesson_number: int | None = None,
+    class_name: str | None = None,
+    subject: str | None = None,
+    room: str | None = None,
+    reason: str | None = None,
+) -> bool:
+    """Отправить учителю push-уведомление о назначении замены.
+    Callback-кнопки используют substitution_id для идентификации записи.
+    Возвращает True при успехе."""
+    global bot
+    if not bot:
+        logger.error("Bot instance not set for notifications")
+        return False
+
+    tg_id = candidate.get("telegram_id")
+    if not tg_id:
+        logger.warning(
+            "Cannot notify candidate %s: no telegram_id", candidate.get("fio")
+        )
+        return False
+
+    absent_name = absent_teacher.get("fio", "коллега")
+
+    # Текст по ТЗ: "Вам назначена замена в {класс} на {номер_урока} вместо {ФИО}. Подтвердите готовность."
+    where = class_name or "—"
+    lesson = str(lesson_number) if lesson_number else "—"
+    lines = [
+        "⚠️ <b>Внимание! Вам назначена замена</b>",
+        "",
+        f"Класс: <b>{where}</b>",
+        f"Урок: <b>{lesson}</b>",
+    ]
+    if subject:
+        lines.append(f"Предмет: {subject}")
+    if room:
+        lines.append(f"Кабинет: {room}")
+    lines.append(f"Вместо: <b>{absent_name}</b>")
+    if reason:
+        lines.append(f"Причина: <i>{reason}</i>")
+    lines.append("")
+    lines.append("<i>Подтвердите готовность.</i>")
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Принять",
+                callback_data=f"sub:confirm:{substitution_id}",
+            ),
+            InlineKeyboardButton(
+                text="❌ Отклонить",
+                callback_data=f"sub:decline:{substitution_id}",
+            ),
+        ],
+    ])
+
+    try:
+        await bot.send_message(
+            chat_id=tg_id,
+            text="\n".join(lines),
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+        logger.info(
+            "Sent substitution notification (id=%s) to %s (tg=%s) instead of %s",
+            substitution_id, candidate.get("fio"), tg_id, absent_name,
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to send substitution notification to %s", candidate.get("fio")
+        )
+        return False
