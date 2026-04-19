@@ -463,7 +463,7 @@ def generate_schedule(
             lesson_number=per,
         ))
 
-    # ленты: для каждого инстанса разворачиваем на все классы × группы
+    # ленты: для каждого инстанса разворачиваем на все классы
     for j, bi in enumerate(band_instances):
         band: BandSpec = bi["band"]
         chosen_s = None
@@ -475,24 +475,23 @@ def generate_schedule(
             continue
         day = chosen_s // P + 1
         per = chosen_s % P + 1
-        # каждый класс параллели — одна запись на каждую группу
-        # НО: ученики каждого класса распределяются по группам.
-        # Для вывода в schedules делаем по одной записи на (class, teacher, room) пару
-        # в порядке band.teachers / band.rooms. Если классов меньше, чем учителей
-        # — всё равно сохраняем все пары (группы уровневые, не классовые).
+        # Для каждого класса параллели создаём одну запись с указанием ленты
+        # В поле room указываем все кабинеты через запятую
+        rooms_str = ", ".join(band.rooms)
         for c_name in band.classes:
-            for t_id, r_name in zip(band.teachers, band.rooms):
-                t = teachers[teacher_idx[t_id]]
-                lessons.append(ScheduledLesson(
-                    class_name=c_name,
-                    subject=band.subject,
-                    teacher_id=t_id,
-                    teacher_name=t.name,
-                    room=r_name,
-                    day_of_week=day,
-                    lesson_number=per,
-                    band_name=band.name,
-                ))
+            # Используем первого учителя для отображения
+            t_id = band.teachers[0]
+            t = teachers[teacher_idx[t_id]]
+            lessons.append(ScheduledLesson(
+                class_name=c_name,
+                subject=band.subject,
+                teacher_id=t_id,
+                teacher_name=t.name,
+                room=rooms_str,
+                day_of_week=day,
+                lesson_number=per,
+                band_name=band.name,
+            ))
 
     # -------------------------------------------------------
     # 7. Статистика по учителям

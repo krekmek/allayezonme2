@@ -1645,22 +1645,27 @@ async def link_related_messages(group_chat_id: int, new_event: dict) -> int | No
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_message(message: Message) -> None:
     """Обработчик сообщений в групповых чатах."""
-    text = message.text or message.caption or ""
-    if not text or len(text.strip()) < 3:
+    try:
+        logger.info(f"📩 Групповое сообщение: chat_id={message.chat.id}, user={message.from_user.username}, text={message.text[:50] if message.text else 'empty'}")
+        text = message.text or message.caption or ""
+        if not text or len(text.strip()) < 3:
+            return
+    except Exception as e:
+        logger.error(f"❌ Ошибка в handle_group_message: {e}")
         return
     
     # Лёгкая классификация
     classification = light_classify_message(text)
     
-    # Если это не управленческая информация - игнорируем
-    if classification["intent"] == "other" and classification["confidence"] < 0.3:
-        return
+    # Анализируем все сообщения, не фильтруем по уверенности
     
     # Определяем автора
     author_telegram_id = message.from_user.id
     author_username = message.from_user.username
     author = await get_staff_by_tg_id(author_telegram_id)
     author_name = author["fio"] if author else None
+    
+    logger.info(f"📝 Анализирую сообщение: intent={classification['intent']}, confidence={classification.get('confidence', 0):.2f}")
     
     # Сохраняем событие
     linked_message_id = await link_related_messages(message.chat.id, {

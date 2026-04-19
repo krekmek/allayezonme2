@@ -43,6 +43,7 @@ type Schedule = {
   task_id?: number | null;
   title?: string | null;
   description?: string | null;
+  band_name?: string | null;
 };
 
 type Conflict = { type: string; message: string };
@@ -783,6 +784,11 @@ function DraggableLesson({
         <div className="flex-1 min-w-0">
           <div className="font-medium text-sm text-foreground truncate flex items-center gap-1.5">
             {schedule.subject}
+            {schedule.band_name && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                Лента
+              </span>
+            )}
             {isTask && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
                 Задача
@@ -792,7 +798,9 @@ function DraggableLesson({
           {schedule.room && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
               <MapPin className="h-3 w-3" />
-              каб. {schedule.room}
+              <span className="truncate max-w-[80px]" title={schedule.room}>
+                каб. {schedule.room.length > 15 ? schedule.room.slice(0, 12) + "..." : schedule.room}
+              </span>
             </div>
           )}
 

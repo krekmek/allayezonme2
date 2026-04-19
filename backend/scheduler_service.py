@@ -207,8 +207,9 @@ async def persist_schedule(result: SchedulerResult) -> dict[str, Any]:
                 "lesson_number": l.lesson_number,
                 "teacher_id": l.teacher_id,
                 "room": l.room,
-                "subject": l.subject + (f" (лента {l.band_name})" if l.band_name else ""),
+                "subject": l.subject + (f" (лента)" if l.band_name else ""),
                 "day_of_week": l.day_of_week,
+                "band_name": l.band_name,
             })
             rows_master.append({
                 "staff_id": l.teacher_id,
