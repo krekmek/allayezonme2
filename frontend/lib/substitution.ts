@@ -30,15 +30,27 @@ export async function findSubstitution(
   lessonNumber: number,
   dayOfWeek?: number
 ): Promise<Staff[]> {
+  console.log("[findSubstitution] Starting search:", { absentTeacherId, lessonNumber, dayOfWeek });
+  
   // 1. Отсутствующий учитель
   const { data: absentRows, error: absentErr } = await supabase
     .from("staff")
     .select("id, fio, role, specialization")
     .eq("id", absentTeacherId)
     .limit(1);
-  if (absentErr) throw absentErr;
+  if (absentErr) {
+    console.error("[findSubstitution] Error fetching absent teacher:", absentErr);
+    throw absentErr;
+  }
   const absent = absentRows?.[0];
-  if (!absent || !absent.specialization) return [];
+  if (!absent) {
+    console.error("[findSubstitution] Absent teacher not found:", absentTeacherId);
+    return [];
+  }
+  if (!absent.specialization) {
+    console.error("[findSubstitution] Absent teacher has no specialization:", absent);
+    return [];
+  }
 
   // Получаем кабинет отсутствующего учителя на этот урок
   let absentRoom: string | null = null;

@@ -20,18 +20,22 @@ type Reference = {
 };
 
 type GenerateResult = {
+  status: "success" | "clarification_needed";
   document: string;
   title: string;
   references: Reference[];
   used_sources: string[];
   request: string;
+  questions?: string[];
+  draft_id?: string;
 };
 
 type State =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "error"; message: string }
-  | { kind: "success"; result: GenerateResult };
+  | { kind: "success"; result: GenerateResult }
+  | { kind: "clarification_needed"; result: GenerateResult };
 
 // Вызываем Next.js API route (см. app/api/rag/generate-document/route.ts)
 const GENERATE_ENDPOINT = "/api/rag/generate-document";
@@ -83,7 +87,12 @@ export function GenerateDocumentButton() {
         });
         return;
       }
-      setState({ kind: "success", result: data as GenerateResult });
+      
+      if (data.status === "clarification_needed") {
+        setState({ kind: "clarification_needed", result: data as GenerateResult });
+      } else {
+        setState({ kind: "success", result: data as GenerateResult });
+      }
     } catch (e: any) {
       setState({
         kind: "error",
@@ -220,6 +229,22 @@ export function GenerateDocumentButton() {
               {state.kind === "error" && (
                 <div className="rounded-md border border-red-500 bg-red-500/10 text-sm text-foreground px-3 py-2">
                   {state.message}
+                </div>
+              )}
+
+              {state.kind === "clarification_needed" && (
+                <div className="space-y-3">
+                  <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 text-sm text-foreground px-3 py-2">
+                    <p className="font-medium mb-2">Для генерации документа нужны дополнительные сведения:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      {state.result.questions?.map((q, i) => (
+                        <li key={i}>{q}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                    <p>Пожалуйста, дополните ваш запрос выше необходимой информацией и нажмите "Сгенерировать заново".</p>
+                  </div>
                 </div>
               )}
 

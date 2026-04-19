@@ -61,6 +61,13 @@ function loadColor(pct: number): string {
   return "bg-emerald-500";
 }
 
+function heatmapBackground(pct: number): string {
+  if (pct >= 90) return "bg-red-500/10 ring-1 ring-red-500/20";
+  if (pct >= 75) return "bg-amber-500/10 ring-1 ring-amber-500/20";
+  if (pct >= 50) return "bg-orange-500/10 ring-1 ring-orange-500/20";
+  return "";
+}
+
 export default function StaffPage() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
@@ -168,6 +175,27 @@ export default function StaffPage() {
         </p>
       </header>
 
+      {/* Легенда heatmap */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-muted-foreground mr-1">Уровень нагрузки:</span>
+        <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 border border-border">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 opacity-70" />
+          Норма
+        </span>
+        <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 border border-border bg-orange-500/10 ring-1 ring-orange-500/20">
+          <span className="w-2 h-2 rounded-full bg-orange-500 opacity-70" />
+          Средняя
+        </span>
+        <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 border border-border bg-amber-500/10 ring-1 ring-amber-500/20">
+          <span className="w-2 h-2 rounded-full bg-amber-500 opacity-70" />
+          Высокая
+        </span>
+        <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 border border-border bg-red-500/10 ring-1 ring-red-500/20">
+          <span className="w-2 h-2 rounded-full bg-red-500 opacity-70" />
+          Критическая
+        </span>
+      </div>
+
       {/* Фильтры по категориям */}
       <div className="flex flex-wrap items-center gap-2">
         {CATEGORIES.map((c) => {
@@ -238,12 +266,13 @@ export default function StaffPage() {
               s.max_load > 0
                 ? Math.min(100, Math.round((s.weekly_load / s.max_load) * 100))
                 : 0;
+            const heatBg = s.max_load > 0 ? heatmapBackground(pct) : "";
             return (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => setSelected(s)}
-                className="text-left rounded-md border border-border bg-card p-4 transition hover:shadow-neon hover:-translate-y-0.5 hover:border-primary/60 space-y-3"
+                className={`text-left rounded-md border border-border bg-card p-4 transition hover:shadow-neon hover:-translate-y-0.5 hover:border-primary/60 space-y-3 ${heatBg}`}
               >
                 <div>
                   <div className="font-semibold text-foreground leading-snug">
@@ -260,7 +289,7 @@ export default function StaffPage() {
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Нагрузка</span>
                       <span className="font-medium text-foreground">
-                        {s.weekly_load}ч / {s.max_load}ч
+                        {s.weekly_load}ч / {s.max_load}ч ({pct}%)
                       </span>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-background/70 overflow-hidden">

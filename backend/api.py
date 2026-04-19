@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from datetime import datetime
 from typing import Any
 
 from aiogram import Bot
@@ -350,6 +351,7 @@ class GenerateDocumentRequest(BaseModel):
     request: str
     director_name: str | None = None
     match_count: int | None = None
+    draft_id: str | None = None  # ID черновика для продолжения
 
 
 @app.post("/api/generate-document")
@@ -370,6 +372,20 @@ async def generate_document(payload: GenerateDocumentRequest):
             match_count=payload.match_count or 6,
             director_name=(payload.director_name or "И.О. Директора"),
         )
+        
+        # Если нужен clarification - сохраняем черновик
+        if result.get("status") == "clarification_needed":
+            draft_id = payload.draft_id or str(hash(text + str(datetime.now())))
+            def _save_draft():
+                supabase.table("document_drafts").upsert({
+                    "id": draft_id,
+                    "original_request": text,
+                    "questions": result["questions"],
+                    "created_at": datetime.now().isoformat(),
+                }).execute()
+            await asyncio.to_thread(_save_draft)
+            result["draft_id"] = draft_id
+        
         return result
     except Exception as exc:
         print(f"[generate_document] failed: {exc}")
@@ -578,6 +594,22 @@ async def update_school_setting(setting_key: str, item: SchoolSetting) -> dict[s
 
 class SimplifyRequest(BaseModel):
     text: str
+
+
+@app.post("/api/rag/ask")
+async def rag_ask(payload: dict[str, Any]) -> dict[str, Any]:
+    """Ответить на вопрос по базе знаний приказов (RAG)."""
+    question = payload.get("question", "").strip()
+    top_k = payload.get("top_k", 5)
+    
+    if not question:
+        return {"error": "Пустой вопрос"}
+    
+    try:
+        result = await rag_service.answer(question, match_count=top_k)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.post("/api/rag/simplify")

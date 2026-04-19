@@ -281,8 +281,10 @@ async def generate_official_document(
     """Сгенерировать официальное распоряжение директора на основе базы знаний (RAG).
 
     Алгоритм:
-    1. Векторный поиск релевантных фрагментов из rag_documents (Приказ №130, №76 и др.)
-    2. LLM составляет официальный документ в деловом стиле со ссылками на приказы
+    1. Анализ достаточности данных (ФИО, дата, причина, основание)
+    2. Если данных недостаточно - вернуть clarification_needed с вопросами
+    3. Векторный поиск релевантных фрагментов из rag_documents (Приказ №130, №76 и др.)
+    4. LLM составляет официальный документ в деловом стиле со ссылками на приказы
 
     Args:
         user_request: краткая суть, напр. "Подготовь приказ о замене учителя математики"
@@ -290,11 +292,19 @@ async def generate_official_document(
         director_name: подставить в подпись
 
     Returns:
+        Если данных недостаточно:
         {
+          "status": "clarification_needed",
+          "questions": ["Укажите ФИО учителя", "Укажите дату", "Укажите причину"],
+          "request": "<исходный запрос>",
+        }
+        Если достаточно данных:
+        {
+          "status": "success",
           "document": "<готовый текст>",
           "title": "...",
           "references": [{"source": "Приказ №130", "chunk_index": 5, "similarity": 0.81, "snippet": "..."}, ...],
-          "used_sources": ["Приказ №130", "Приказ №76"],  # уникальные для плашки
+          "used_sources": ["Приказ №130", "Приказ №76"],
           "request": "<исходный запрос>",
         }
     """
@@ -304,7 +314,46 @@ async def generate_official_document(
     if not user_request or not user_request.strip():
         raise ValueError("Пустой запрос на генерацию документа.")
 
-    # 1. RAG: ищем релевантные фрагменты приказов
+    # 1. Анализ достаточности данных
+    analysis_system = (
+        "Ты — помощник директора школы. Проанализируй запрос на генерацию официального документа. "
+        "Проверь наличие следующей информации:\n"
+        "- ФИО участников (учеников, учителей, родителей)\n"
+        "- Дата (дата события или документа)\n"
+        "- Конкретная причина (почему нужен документ)\n"
+        "- Основание (на каком основании или по какому поводу)\n\n"
+        "Если какой-то элемент отсутствует — верни JSON с вопросами.\n"
+        "Формат ответа (СТРОГО JSON):\n"
+        '{"sufficient": true/false, "questions": ["вопрос1", "вопрос2", "вопрос3"]}'
+    )
+
+    analysis_resp = await _groq.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": analysis_system},
+            {"role": "user", "content": f"Запрос: {user_request}"},
+        ],
+        temperature=0.2,
+    )
+
+    analysis_text = analysis_resp.choices[0].message.content or ""
+    try:
+        # Пытаемся извлечь JSON из ответа
+        import re
+        json_match = re.search(r'\{[^{}]*\}', analysis_text)
+        if json_match:
+            analysis = json.loads(json_match.group())
+            if not analysis.get("sufficient", True):
+                return {
+                    "status": "clarification_needed",
+                    "questions": analysis.get("questions", [])[:3],  # Максимум 3 вопроса
+                    "request": user_request.strip(),
+                }
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning(f"Не удалось разобрать анализ данных: {e}")
+        # Продолжаем, предполагая что данных достаточно
+
+    # 2. RAG: ищем релевантные фрагменты приказов
     hits = await search(user_request, match_count=match_count)
 
     # 2. Контекст для LLM
@@ -388,6 +437,7 @@ async def generate_official_document(
     ]
 
     return {
+        "status": "success",
         "document": document,
         "title": title,
         "references": references,

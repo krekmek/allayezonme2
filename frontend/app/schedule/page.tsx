@@ -16,6 +16,8 @@ import {
   Flame,
   GripVertical,
   Wrench,
+  Download,
+  FileSpreadsheet,
 } from "lucide-react";
 import {
   DndContext,
@@ -149,6 +151,13 @@ export default function SchedulePage() {
     message: string;
   } | null>(null);
 
+  const [substitutionNotification, setSubstitutionNotification] = useState<{
+    absentTeacher: string;
+    substitutingTeacher: string;
+    className: string;
+    lessonNumber: number;
+  } | null>(null);
+
   // Показ тоста (автоисчезает)
   useEffect(() => {
     if (!toast) return;
@@ -162,6 +171,40 @@ export default function SchedulePage() {
     const t = setTimeout(() => setFlashConflict(null), 1800);
     return () => clearTimeout(t);
   }, [flashConflict]);
+
+  // Realtime подписка на новые замены
+  useEffect(() => {
+    const channel = supabase
+      .channel("substitutions-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "substitutions",
+        },
+        async (payload) => {
+          const newSub = payload.new as any;
+          const absent = staff[newSub.absent_teacher_id];
+          const substituting = staff[newSub.candidate_id];
+          if (absent && substituting) {
+            setSubstitutionNotification({
+              absentTeacher: absent.fio,
+              substitutingTeacher: substituting.fio,
+              className: newSub.class_name,
+              lessonNumber: newSub.lesson_number,
+            });
+            // Автоисчезновение через 10 секунд
+            setTimeout(() => setSubstitutionNotification(null), 10000);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [staff]);
 
   useEffect(() => {
     async function load() {
@@ -444,16 +487,55 @@ export default function SchedulePage() {
     }
   }
 
+  function exportToExcel() {
+    // Simple CSV export as Excel-compatible format
+    const headers = ["День", "Урок", "Класс", "Предмет", "Кабинет", "Учитель"];
+    const rows = filtered.map((s) => {
+      const dayName = s.day_of_week !== null ? DAY_NAMES[s.day_of_week - 1] : "Не указан";
+      const teacher = s.teacher_id ? staff[s.teacher_id]?.fio || "" : "";
+      return [
+        dayName,
+        s.lesson_number,
+        s.class_name || "",
+        s.subject,
+        s.room || "",
+        teacher,
+      ];
+    });
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+    ].join("\n");
+
+    const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `расписание-${selectedDay === "all" ? "все-дни" : DAY_NAMES[(selectedDay as number) - 1]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   // ============================================================
   // Render
   // ============================================================
   return (
     <div className="space-y-6" onClick={() => setOpenCell(null)}>
       <header className="space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight text-foreground flex items-center gap-3">
-          <CalendarDays className="h-8 w-8 text-muted-foreground" />
-          Расписание
-        </h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-4xl font-bold tracking-tight text-foreground flex items-center gap-3">
+            <CalendarDays className="h-8 w-8 text-muted-foreground" />
+            Расписание
+          </h1>
+          <button
+            onClick={exportToExcel}
+            className="inline-flex items-center gap-2 rounded-md bg-primary/15 border border-neon px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/25 hover:shadow-neon"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Экспорт в Excel
+          </button>
+        </div>
         <p className="text-muted-foreground">
           <Flame className="inline h-4 w-4 -mt-0.5 text-orange-500" /> Heatmap
           нагрузки учителей. Перетаскивайте уроки мышкой — система проверит
@@ -646,6 +728,80 @@ export default function SchedulePage() {
         </div>
       )}
 
+      {/* Substitution Notification Banner */}
+      {substitutionNotification && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 rounded-md border border-primary/60 bg-primary/15 px-6 py-4 shadow-xl text-sm max-w-lg animate-in slide-in-from-top-4">
+          <div className="flex items-start gap-3">
+            <UserX className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+            <div className="flex-1 space-y-1">
+              <div className="font-medium text-foreground">Новая замена</div>
+              <div className="text-xs text-muted-foreground">
+                {substitutionNotification.absentTeacher} → {substitutionNotification.substitutingTeacher}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Класс {substitutionNotification.className}, урок {substitutionNotification.lessonNumber}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSubstitutionNotification(null)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict Summary Panel */}
+      {flashConflict && flashConflict.conflicts.length > 0 && (
+        <div className="fixed bottom-6 left-6 z-50 rounded-md border border-red-500/60 bg-red-500/15 px-4 py-3 shadow-xl text-sm text-red-100 max-w-md">
+          <div className="flex items-start gap-2 mb-2">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span className="font-medium">Конфликт при перемещении:</span>
+          </div>
+          <ul className="space-y-1 text-xs mb-3">
+            {flashConflict.conflicts.map((conflict, idx) => (
+              <li key={idx} className="flex items-start gap-1">
+                <span className="text-red-400">•</span>
+                <span>{conflict.message}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="border-t border-red-500/30 pt-2 mt-2">
+            <div className="text-xs text-red-300 italic mb-2">
+              💡 Рекомендации:
+            </div>
+            <ul className="space-y-1 text-xs">
+              {flashConflict.conflicts.some(c => c.type === "room_busy") && (
+                <li className="flex items-start gap-1">
+                  <span className="text-emerald-400">✓</span>
+                  <span>Попробуйте другой свободный кабинет</span>
+                </li>
+              )}
+              {flashConflict.conflicts.some(c => c.type === "teacher_busy") && (
+                <li className="flex items-start gap-1">
+                  <span className="text-emerald-400">✓</span>
+                  <span>Выберите другой день или урок для учителя</span>
+                </li>
+              )}
+              {flashConflict.conflicts.some(c => c.type === "class_busy") && (
+                <li className="flex items-start gap-1">
+                  <span className="text-emerald-400">✓</span>
+                  <span>Класс уже занят в этом слоте</span>
+                </li>
+              )}
+              {flashConflict.conflicts.some(c => c.type === "band_break") && (
+                <li className="flex items-start gap-1">
+                  <span className="text-amber-400">!</span>
+                  <span>Лента требует синхронного перемещения всех групп</span>
+                </li>
+              )}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {subModal && (
         <SubstitutionModal
           data={subModal}
@@ -798,9 +954,7 @@ function DraggableLesson({
           {schedule.room && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
               <MapPin className="h-3 w-3" />
-              <span className="truncate max-w-[80px]" title={schedule.room}>
-                каб. {schedule.room.length > 15 ? schedule.room.slice(0, 12) + "..." : schedule.room}
-              </span>
+              каб. {schedule.room}
             </div>
           )}
 
