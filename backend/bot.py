@@ -1525,6 +1525,211 @@ async def _cascade_substitution_for_full_day(
     await message.answer("\n".join(lines))
 
 
+# ---------------------- Group Message Handler ----------------------
+
+# Хранилище для связывания сообщений (в памяти для MVP)
+MESSAGE_CONTEXT: dict[int, dict] = {}  # group_chat_id -> {last_absence: {...}, last_incident: {...}}
+
+
+def light_classify_message(text: str) -> dict[str, Any]:
+    """Лёгкий классификатор для определения типа сообщения в группе."""
+    text_lower = text.lower()
+    
+    # Ключевые слова для разных типов сообщений
+    absence_keywords = ["болею", "заболел", "не смогу", "отпрошусь", "не прид", "отсутств", "нет"]
+    substitution_keywords = ["замена", "подмени", "замени", "заместит", "заместить"]
+    incident_keywords = ["сломал", "сломалось", "проблема", "инцидент", "авария", "драка", "пожар", "утечка"]
+    canteen_keywords = ["столовая", "обед", "порции", "присутств", "отсутств", "детей", "класс"]
+    
+    detected_intent = "other"
+    confidence = 0.0
+    
+    # Проверяем ключевые слова
+    for keyword in absence_keywords:
+        if keyword in text_lower:
+            detected_intent = "absence"
+            confidence = 0.7
+            break
+    
+    for keyword in substitution_keywords:
+        if keyword in text_lower:
+            detected_intent = "substitution"
+            confidence = 0.8
+            break
+    
+    for keyword in incident_keywords:
+        if keyword in text_lower:
+            detected_intent = "incident"
+            confidence = 0.9
+            break
+    
+    for keyword in canteen_keywords:
+        if keyword in text_lower:
+            # Проверяем наличие чисел (класс или количество)
+            if any(char.isdigit() for char in text):
+                detected_intent = "canteen_report"
+                confidence = 0.6
+    
+    # Проверяем наличие фамилий учителей (простая эвристика)
+    # Если есть фамилия + глагол действия
+    action_verbs = ["подготовь", "сделай", "напиши", "организуй", "закажи", "приведи"]
+    if any(verb in text_lower for verb in action_verbs):
+        detected_intent = "task"
+        confidence = 0.5
+    
+    return {
+        "intent": detected_intent,
+        "confidence": confidence,
+        "is_critical": any(kw in text_lower for kw in ["драка", "пожар", "авария", "опасно", "срочно", "экстренно"])
+    }
+
+
+async def save_group_event(
+    raw_text: str,
+    detected_intent: str,
+    author_telegram_id: int,
+    author_name: str | None,
+    author_username: str | None,
+    group_chat_id: int,
+    message_id: int,
+    is_critical: bool = False,
+    linked_message_id: int | None = None
+) -> dict[str, Any] | None:
+    """Сохранить событие из группового чата в базу данных."""
+    def _run() -> dict[str, Any] | None:
+        resp = (
+            supabase.table("group_events")
+            .insert({
+                "raw_text": raw_text,
+                "detected_intent": detected_intent,
+                "author_telegram_id": author_telegram_id,
+                "author_name": author_name,
+                "author_username": author_username,
+                "group_chat_id": group_chat_id,
+                "message_id": message_id,
+                "is_critical": is_critical,
+                "linked_message_id": linked_message_id,
+                "processed": False
+            })
+            .execute()
+        )
+        return resp.data[0] if resp.data else None
+    
+    return await asyncio.to_thread(_run)
+
+
+async def link_related_messages(group_chat_id: int, new_event: dict) -> int | None:
+    """Связать сообщения в контексте (например, отсутствие -> назначение замены)."""
+    context = MESSAGE_CONTEXT.get(group_chat_id, {})
+    
+    # Если это сообщение о замене и есть недавнее отсутствие
+    if new_event["detected_intent"] == "substitution" and "last_absence" in context:
+        last_absence = context["last_absence"]
+        # Если отсутствие было менее 5 минут назад
+        import time
+        if time.time() - last_absence["timestamp"] < 300:
+            return last_absence["message_id"]
+    
+    # Если это сообщение об отсутствии
+    if new_event["detected_intent"] == "absence":
+        context["last_absence"] = {
+            "message_id": new_event["message_id"],
+            "timestamp": time.time(),
+            "author": new_event["author_telegram_id"]
+        }
+        MESSAGE_CONTEXT[group_chat_id] = context
+    
+    return None
+
+
+@dp.message(F.chat.type.in_({"group", "supergroup"}))
+async def handle_group_message(message: Message) -> None:
+    """Обработчик сообщений в групповых чатах."""
+    text = message.text or message.caption or ""
+    if not text or len(text.strip()) < 3:
+        return
+    
+    # Лёгкая классификация
+    classification = light_classify_message(text)
+    
+    # Если это не управленческая информация - игнорируем
+    if classification["intent"] == "other" and classification["confidence"] < 0.3:
+        return
+    
+    # Определяем автора
+    author_telegram_id = message.from_user.id
+    author_username = message.from_user.username
+    author = await get_staff_by_tg_id(author_telegram_id)
+    author_name = author["fio"] if author else None
+    
+    # Сохраняем событие
+    linked_message_id = await link_related_messages(message.chat.id, {
+        "detected_intent": classification["intent"],
+        "message_id": message.message_id,
+        "author_telegram_id": author_telegram_id
+    })
+    
+    event = await save_group_event(
+        raw_text=text,
+        detected_intent=classification["intent"],
+        author_telegram_id=author_telegram_id,
+        author_name=author_name,
+        author_username=author_username,
+        group_chat_id=message.chat.id,
+        message_id=message.message_id,
+        is_critical=classification["is_critical"],
+        linked_message_id=linked_message_id
+    )
+    
+    if event:
+        logging.info(
+            f"Group event saved: intent={classification['intent']}, "
+            f"author={author_name or author_username}, critical={classification['is_critical']}"
+        )
+        
+        # Если критический инцидент - отправляем уведомление директору
+        if classification["is_critical"]:
+            await notify_director_critical_incident(event, author_name or author_username)
+
+
+async def notify_director_critical_incident(event: dict[str, Any], author_name: str) -> None:
+    """Отправить экстренное уведомление директору о критическом инциденте."""
+    # Находим директора
+    directors = await asyncio.to_thread(
+        lambda: supabase.table("staff").select("*").eq("role", "director").execute()
+    )
+    
+    if not directors.data:
+        return
+    
+    director = directors.data[0]
+    director_tg_id = director.get("telegram_id")
+    
+    if not director_tg_id:
+        return
+    
+    # Формируем сообщение
+    intent_labels = {
+        "incident": "🚨 КРИТИЧЕСКИЙ ИНЦИДЕНТ",
+        "absence": "⚠️ СРОЧНОЕ ОТСУТСТВИЕ",
+        "substitution": "🔄 СРОЧНАЯ ЗАМЕНА",
+    }
+    
+    label = intent_labels.get(event["detected_intent"], "🚨 КРИТИЧЕСКОЕ СОБЫТИЕ")
+    
+    try:
+        await bot.send_message(
+            director_tg_id,
+            f"{label}\n\n"
+            f"Автор: {author_name}\n"
+            f"Сообщение: {event['raw_text']}\n"
+            f"Время: {event['timestamp']}"
+        )
+        logging.info(f"Critical incident notification sent to director {director['fio']}")
+    except Exception as exc:
+        logging.exception("Failed to send critical incident notification to director")
+
+
 # ---------------------- entrypoint ----------------------
 
 async def set_bot_commands() -> None:
